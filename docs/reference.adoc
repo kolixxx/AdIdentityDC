@@ -1,0 +1,373 @@
+= Reference
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Назначение
+
+Краткая шпаргалка по продукту: сущности, события, API, настройки, имена, типовые значения.
+
+== Компоненты (коротко)
+
+[cols="1,2"]
+|===
+|Компонент |Назначение
+
+|Windows Agent
+|События login/auth на DC -> session state -> push
+
+|OPNsense Plugin
+|Приём sessions -> Aliases
+
+|Aliases
+|Group/User IP lists для Firewall Rules
+
+|Firewall Rules
+|Пишет администратор
+|===
+
+== Главная связка
+
+[source]
+----
+user <-> ip <-> group  =>  Alias(group) = [ip...]
+----
+
+Опционально:
+
+[source]
+----
+user <-> ip  =>  Alias(user) = [ip]
+----
+
+== Event ID (шпаргалка)
+
+[cols="1,2,2"]
+|===
+|ID |Смысл |v1
+
+|4768
+|Kerberos TGT request
+|Основной
+
+|4624
+|Successful logon
+|Дополнительный
+
+|4776
+|NTLM auth
+|Опционально
+
+|4634 / 4647
+|Logoff
+|Не опираться как на истину
+|===
+
+== Logon Type (4624)
+
+[cols="1,2,2"]
+|===
+|Type |Имя |v1
+
+|2
+|Interactive
+|Осторожно / позже
+
+|3
+|Network
+|Не брать вслепую
+
+|7
+|Unlock
+|Обычно ignore
+
+|10
+|RemoteInteractive
+|Брать
+
+|4/5
+|Batch/Service
+|Ignore
+|===
+
+== Фильтры drop (must)
+
+* username заканчивается на `$`
+* `ANONYMOUS LOGON`, `SYSTEM`, аналоги
+* IP пустой / `-` / `127.0.0.1` / `::1`
+
+== Pilot contract v1 (зафиксировано)
+
+Working name:: `AdIdentity`  
+OPNsense module:: `OPNsense\AdIdentity`  
+Auth:: `Authorization: Bearer <shared_token>` (один token на Agent <-> Plugin)
+
+=== Session object
+
+[source,json]
+----
+{
+  "user": "ivanov",
+  "domain": "CORP",
+  "ip": "10.10.20.55",
+  "groups": ["Managers", "Office-Users"],
+  "event": "login",
+  "ts": "2026-08-02T15:40:00Z",
+  "dc": "dc01.corp.local",
+  "expires_at": "2026-08-02T23:40:00Z"
+}
+----
+
+[cols="1,1,2"]
+|===
+|Поле |Обязательность |Смысл
+
+|`user`
+|required
+|sAMAccountName
+
+|`domain`
+|required
+|NetBIOS или DNS domain
+
+|`ip`
+|required
+|IPv4 клиента (v1)
+
+|`groups`
+|required (может быть `[]`)
+|группы после LDAP; желательно уже пересечённые с allowlist
+
+|`event`
+|required
+|`login` \| `refresh` \| `ip_changed`
+
+|`ts`
+|required
+|ISO-8601 UTC
+
+|`dc`
+|optional
+|имя DC-источника
+
+|`expires_at`
+|optional
+|если нет — Plugin считает от TTL
+|===
+
+=== Plugin API (принимает push)
+
+Base:: `/api/adidentity`
+
+[cols="1,2"]
+|===
+|Endpoint |Смысл
+
+|`POST /api/adidentity/session/upsert`
+|создать/обновить сессию + aliases
+
+|`POST /api/adidentity/session/remove`
+|удалить сессию/IP binding
+
+|`GET /api/adidentity/session/list`
+|локальный список сессий Plugin (debug/UI)
+
+|`POST /api/adidentity/service/reconfigure`
+|применить настройки Plugin
+|===
+
+`remove` body:
+
+[source,json]
+----
+{
+  "user": "ivanov",
+  "domain": "CORP",
+  "ip": "10.10.20.55",
+  "reason": "ttl_expired"
+}
+----
+
+`reason`: `ttl_expired` | `ip_changed` | `manual_remove` | `logout` | `resync`
+
+=== Agent API (отдаёт state)
+
+Base:: `/api/v1` на хосте Agent
+
+[cols="1,2"]
+|===
+|Endpoint |Смысл
+
+|`GET /api/v1/health`
+|alive/status
+
+|`GET /api/v1/sessions`
+|полный snapshot сессий
+|===
+
+`health` (минимум):
+
+[source,json]
+----
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "sessions": 42
+}
+----
+
+`sessions`:
+
+[source,json]
+----
+{
+  "sessions": [ { "...": "session object" } ]
+}
+----
+
+Транспорт:: main = push Agent→Plugin; backup = resync Plugin→Agent (`GET /api/v1/sessions`) on start/manual/repair
+
+=== Alias naming
+
+Нормализация имени:
+
+* только `A-Za-z0-9_`;
+* прочие символы → `_`;
+* схлопнуть повторные `_`;
+* обрезать края `_`;
+* должно начинаться с буквы (если нет — префикс `g_` / `u_`).
+
+[cols="1,2,2"]
+|===
+|Тип |Имя |Содержимое
+
+|Group alias
+|нормализованное имя AD-группы (`Managers`, `Office_Users`)
+|IP активных пользователей группы
+
+|User alias (opt)
+|`u_` + нормализованный `user` (настраиваемый prefix)
+|обычно 1 IP
+|===
+
+Операции: точечные add/delete IP; full rebuild только на resync/repair.
+
+=== Минимальный UI Plugin
+
+Обязательные настройки:
+
+* `enabled`
+* `shared_token`
+* `agent_base_url` (для health/resync)
+* `monitored_groups` (список, one-per-line)
+* `enable_user_aliases` (default off)
+* `session_ttl_sec` (default `28800` = 8h)
+
+Опционально / advanced:
+
+* `user_alias_prefix` (default `u_`)
+* `auto_create_aliases` (default on)
+* `debounce_ms` (default `2000`)
+
+=== Минимальный конфиг Agent
+
+* `plugin_base_url` (например `https://opnsense.corp.local`)
+* `shared_token`
+* `listen_addr` / `listen_port` (default `8443`)
+* LDAP: host, bind, base DN
+* `monitored_groups`
+* `session_ttl_sec`
+* event profile: `4768` + ограниченный `4624`
+
+=== Дефолты пилота
+
+[cols="1,2"]
+|===
+|Параметр |Default
+
+|DC
+|1
+
+|User aliases
+|Off
+
+|Primary event
+|4768
+
+|TTL
+|28800 sec
+
+|Debounce
+|2000 ms
+
+|LDAP cache
+|5–15 min (agent-side)
+
+|Transport
+|push + resync-on-start
+|===
+
+== Ответственность
+
+[cols="1,2"]
+|===
+|Кто |Что делает
+
+|Agent
+|identity/session truth
+
+|Plugin
+|projection to aliases
+
+|Admin
+|Firewall Rules
+|===
+
+== Быстрая диагностика (1 минута)
+
+. Пользователь залогинен?
+. Есть event на DC?
+. Есть session в Agent?
+. Push accepted Plugin?
+. IP есть в group alias?
+. Firewall rule использует этот alias и стоит в нужном порядке?
+
+Если где-то "нет" — чинить этот слой, не следующий.
+
+== Частые reason codes (целевые)
+
+[cols="1,2"]
+|===
+|Reason |Смысл
+
+|`login`
+|Новая/обновлённая сессия
+
+|`ip_changed`
+|Сменился IP пользователя
+
+|`ttl_expired`
+|Сессия протухла
+
+|`manual_remove`
+|Сняли вручную
+
+|`resync`
+|Восстановление state
+|===
+
+== Чего продукт не делает
+
+* не пишет firewall rules сам;
+* не заменяет 802.1X/NAC;
+* не считает logoff идеальным сигналом;
+* не закрывает multi-DC без коллектора в v1.
+
+== Связанные документы
+
+* link:overview.adoc[Overview]
+* link:architecture.adoc[Architecture]
+* link:configuration.adoc[Configuration]
+* link:installation.adoc[Installation]
+* link:perfomance.adoc[Performance]
+* link:troubleshooting.adoc[Troubleshooting]

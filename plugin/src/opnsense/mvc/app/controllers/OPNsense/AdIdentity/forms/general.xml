@@ -1,0 +1,56 @@
+<form>
+    <field>
+        <id>adidentity.general.enabled</id>
+        <label>Enable</label>
+        <type>checkbox</type>
+        <help>Enable AdIdentity session ingest and alias updates.</help>
+    </field>
+    <field>
+        <id>adidentity.general.shared_token</id>
+        <label>Shared token</label>
+        <type>text</type>
+        <help>Bearer token shared with the Windows Agent.</help>
+    </field>
+    <field>
+        <id>adidentity.general.agent_base_url</id>
+        <label>Agent base URL</label>
+        <type>text</type>
+        <help>Example: https://dc01.corp.local:8443</help>
+    </field>
+    <field>
+        <id>adidentity.general.monitored_groups</id>
+        <label>Monitored groups</label>
+        <type>textbox</type>
+        <help>One AD group name per line. Only these groups become aliases.</help>
+    </field>
+    <field>
+        <id>adidentity.general.enable_user_aliases</id>
+        <label>Enable user aliases</label>
+        <type>checkbox</type>
+        <help>Optional: create per-user aliases (one IP each).</help>
+    </field>
+    <field>
+        <id>adidentity.general.user_alias_prefix</id>
+        <label>User alias prefix</label>
+        <type>text</type>
+        <help>Prefix for optional user aliases, default u_</help>
+    </field>
+    <field>
+        <id>adidentity.general.auto_create_aliases</id>
+        <label>Auto-create aliases</label>
+        <type>checkbox</type>
+        <help>Create missing group/user aliases automatically.</help>
+    </field>
+    <field>
+        <id>adidentity.general.session_ttl_sec</id>
+        <label>Session TTL (seconds)</label>
+        <type>text</type>
+        <help>Default 28800 (8 hours).</help>
+    </field>
+    <field>
+        <id>adidentity.general.debounce_ms</id>
+        <label>Alias debounce (ms)</label>
+        <type>text</type>
+        <help>Batch alias updates. Default 2000.</help>
+    </field>
+</form>

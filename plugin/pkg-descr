@@ -1,0 +1,6 @@
+AdIdentity maps Active Directory logon sessions to OPNsense firewall aliases
+so administrators can write rules by AD group (and optionally by user).
+
+This is a pilot: one Domain Controller agent pushes user/ip/group sessions
+to the OPNsense plugin, which maintains aliases. Firewall rules remain
+admin-defined.

@@ -1,0 +1,44 @@
+# Build output
+bin/
+obj/
+publish/
+*.user
+*.suo
+
+# Local overrides that may hold the shared token or lab passwords.
+# The tracked appsettings.json must stay a placeholder; real values live only
+# in the deployed copy on the DC, outside this repository.
+agent/src/**/appsettings.Development.json
+agent/src/**/appsettings.Production.json
+agent/src/**/appsettings.Local.json
+*.local.json
+
+# Secrets
+*.pfx
+*.key
+*.pem
+secrets.json
+
+# OPNsense configuration backups. These contain the full firewall config,
+# including account password hashes and any VPN/SNMP material. Keep them local.
+backup_opnsense*.xml
+config-*.xml
+*opnsense*backup*.xml
+
+# Lab topology notes: interface map, addresses and port forwards of the test
+# stand. Useful locally, not for a public repository.
+docs/lab-opnsense-internet.txt
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vs/
+.idea/
+
+# Archives produced when shipping the plugin to OPNsense
+plugin-adidentity*.zip

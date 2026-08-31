@@ -1,0 +1,278 @@
+= Configuration
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Обзор настройки
+
+После установки нужно настроить два контура:
+
+. **Windows Agent** на Domain Controller;
+. **OPNsense Plugin** на firewall.
+
+Цель: чтобы login в AD превращался в актуальные Group Aliases на OPNsense, а администратор мог использовать эти aliases в Firewall Rules.
+
+== Подготовка инфраструктуры
+
+Перед конфигурацией убедитесь, что:
+
+* есть один пилотный Domain Controller;
+* OPNsense доступен с DC по HTTPS (и наоборот для resync, если нужен);
+* на DC включён нужный audit для Security Log;
+* есть служебная учётка (или иной способ) для LDAP-чтения групп;
+* выбран список AD-групп для пилота (лучше 2–5 групп, не весь домен).
+
+== Конфигурация Windows Agent
+
+=== Базовые параметры
+
+[cols="1,2,2"]
+|===
+|Параметр |Смысл |Пример / рекомендация
+
+|Listen / API port
+|Порт API агента для health/resync
+|`8443` или иной свободный
+
+|Plugin URL
+|Куда пушить сессии
+|`https://opnsense.corp.local/.../session/upsert`
+
+|Shared token
+|Секрет для auth Agent <-> Plugin
+|длинный случайный токен
+
+|Domain
+|Целевой NetBIOS/DNS domain
+|`CORP` / `corp.local`
+
+|LDAP server
+|Обычно localhost/DC
+|`ldaps://dc01.corp.local`
+
+|LDAP bind account
+|Учётка для чтения групп
+|`CORP\svc-idad-ldap`
+
+|Session TTL
+|Время жизни сессии без refresh
+|`8h` (пилот)
+
+|Event sources
+|Какие event ID читать
+|`4768`, ограниченный `4624`
+|===
+
+=== Фильтры событий
+
+Рекомендуемый профиль пилота:
+
+* принимать `4768` success с валидным Client Address;
+* принимать `4624` только Logon Type `10` (RDP);
+* игнорировать computer accounts (`$`);
+* игнорировать localhost/empty IP;
+* игнорировать служебные учётки по allow/deny list.
+
+=== LDAP / группы
+
+Настройки:
+
+* base DN / search mode;
+* какие атрибуты использовать (`memberOf` для старта);
+* нормализация имён групп в имена aliases;
+* (позже) nested groups.
+
+TIP: Для пилота лучше синхронизировать не все группы AD, а только явный allowlist.
+
+=== Пример логики allowlist групп
+
+[source]
+----
+MonitoredGroups =
+  Managers
+  Developers
+  Directors
+----
+
+Если пользователь входит в `Managers` и `All-Staff`, а `All-Staff` не в allowlist, в Plugin уйдут только `Managers`.
+
+== Конфигурация OPNsense Plugin
+
+=== Базовые параметры
+
+[cols="1,2,2"]
+|===
+|Параметр |Смысл |Рекомендация
+
+|Enable plugin
+|Включить приём сессий
+|On
+
+|Agent endpoint
+|URL агента для resync/health
+|`https://dc01.corp.local:8443`
+
+|Auth token
+|Должен совпадать с Agent
+|тот же shared token
+
+|Monitored groups
+|Какие group aliases вести
+|совпадает с allowlist агента
+
+|Create aliases automatically
+|Создавать aliases, если их нет
+|On для пилота
+
+|User aliases
+|Галочка per-user aliases
+|Off по умолчанию
+
+|User alias prefix
+|Префикс имени alias пользователя
+|например `u_` => `u_ivanov`
+
+|Session TTL / skew
+|Согласование aging с агентом
+|как у агента или чуть больше
+
+|Debounce interval
+|Пачка apply изменений aliases
+|`1-3s`
+|===
+
+=== Group aliases
+
+Режимы:
+
+* **auto-create**: plugin создаёт alias при первом появлении группы из allowlist;
+* **pre-create**: администратор/плагин заранее создаёт aliases для всех monitored groups.
+
+Имя alias:
+
+* по умолчанию = имя группы (с нормализацией недопустимых символов при необходимости).
+
+Содержимое alias:
+
+* IP пользователей группы, имеющих активную сессию.
+
+=== User aliases (опция)
+
+Если включено:
+
+* для каждого активного пользователя создаётся отдельный alias;
+* обычно содержит один IP;
+* удобно для точечных исключений, но плохо масштабируется на тысячи пользователей.
+
+Рекомендация:
+
+* в пилоте сначала проверить group aliases;
+* user aliases включать точечно.
+
+== Сценарии настройки
+
+=== Сценарий A. Минимальный пилот (только группы)
+
+Цель:: проверить, что login менеджера открывает доступ по group alias.
+
+Шаги::
+. В Agent включить monitored group `Managers`.
+. В Plugin включить ту же группу, user aliases = Off.
+. На OPNsense создать правило:  
+  `Allow source=Managers destination=...`
+. Залогинить тестового пользователя из `Managers`.
+. Проверить, что IP появился в alias `Managers`.
+. Проверить, что трафик проходит по правилу.
+
+=== Сценарий B. Deny для одной группы
+
+Цель:: запретить группе выход в интернет/к ресурсу.
+
+Шаги::
+. Синхронизировать группу `Interns`.
+. Создать правило выше general allow:  
+  `Deny source=Interns destination=any` (или нужный ресурс).
+. Залогинить пользователя из `Interns`.
+. Убедиться, что IP в alias и deny срабатывает.
+
+=== Сценарий C. Пользовательское исключение
+
+Цель:: группе запрещено, одному пользователю разрешено.
+
+Шаги::
+. Включить user aliases.
+. Создать:
+** deny для group alias;
+** allow для user alias конкретного пользователя (выше/приоритетнее по порядку правил).
+. Проверить оба случая.
+
+=== Сценарий D. Смена IP пользователя
+
+Цель:: корректное обновление aliases при DHCP/смене адреса.
+
+Шаги::
+. Пользователь залогинен с `10.10.20.55`.
+. Получает новый IP `10.10.20.60` и проходит auth mapping.
+. Ожидание:
+** старый IP удалён из group aliases;
+** новый IP добавлен;
+** правило продолжает работать уже для нового IP.
+
+=== Сценарий E. Resync после ребута OPNsense
+
+Цель:: восстановить aliases без ручной чистки.
+
+Шаги::
+. Накопить несколько активных сессий.
+. Перезапустить OPNsense / Plugin.
+. Plugin запрашивает `GET /sessions` у Agent.
+. Aliases пересобираются по snapshot.
+
+== Согласованность настроек Agent и Plugin
+
+Обязательно должны совпадать:
+
+* auth token;
+* понимание имён групп / нормализация;
+* общий смысл TTL;
+* набор monitored groups (желательно).
+
+Иначе возможны:
+
+* rejected push (auth mismatch);
+* пустые aliases;
+* "лишние" или "пропавшие" группы.
+
+== Firewall Rules: зона ответственности администратора
+
+Plugin только готовит aliases.  
+Примеры правил администратора:
+
+[source]
+----
+1. Deny  source=Interns     dest=RFC1918-servers
+2. Allow source=Managers    dest=Internet
+3. Allow source=Developers  dest=Git-Servers
+----
+
+Порядок правил важен так же, как в обычном OPNsense.
+
+== Рекомендуемый порядок первой настройки
+
+. Настроить Agent (events + LDAP + token + plugin URL).
+. Настроить Plugin (token + agent URL + monitored groups).
+. Проверить health Agent <-> Plugin.
+. Сделать тестовый login.
+. Проверить session в Agent.
+. Проверить session/alias в Plugin.
+. Написать 1–2 тестовых Firewall Rules.
+. Проверить allow/deny реально трафиком.
+. Только потом включать user aliases и расширять список групп.
+
+== Практические советы пилота
+
+* Начните с 2–3 групп и 5–10 пользователей.
+* Не включайте сразу весь AD.
+* Держите рядом "эталонного" тестового пользователя в известной группе.
+* Любое неочевидное поведение сначала проверяйте цепочкой:  
+  `Event on DC -> session in Agent -> push accepted -> alias updated -> rule matched`.

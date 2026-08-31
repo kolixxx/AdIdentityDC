@@ -1,0 +1,44 @@
+<model>
+    <mount>//OPNsense/adidentity</mount>
+    <description>AdIdentity — AD user/group sessions to firewall aliases</description>
+    <version>0.1.0</version>
+    <items>
+        <general>
+            <enabled type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </enabled>
+            <shared_token type="TextField">
+                <Required>N</Required>
+            </shared_token>
+            <agent_base_url type="UrlField">
+                <Required>N</Required>
+            </agent_base_url>
+            <monitored_groups type="TextField">
+                <Required>N</Required>
+            </monitored_groups>
+            <enable_user_aliases type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </enable_user_aliases>
+            <user_alias_prefix type="TextField">
+                <Default>u_</Default>
+                <Required>Y</Required>
+            </user_alias_prefix>
+            <auto_create_aliases type="BooleanField">
+                <Default>1</Default>
+                <Required>Y</Required>
+            </auto_create_aliases>
+            <session_ttl_sec type="IntegerField">
+                <Default>28800</Default>
+                <MinimumValue>60</MinimumValue>
+                <Required>Y</Required>
+            </session_ttl_sec>
+            <debounce_ms type="IntegerField">
+                <Default>2000</Default>
+                <MinimumValue>0</MinimumValue>
+                <Required>Y</Required>
+            </debounce_ms>
+        </general>
+    </items>
+</model>

@@ -1,0 +1,10 @@
+<acl>
+    <page-adidentity>
+        <name>Firewall: AdIdentity</name>
+        <description>Allow access to AdIdentity settings and sessions</description>
+        <patterns>
+            <pattern>ui/adidentity/*</pattern>
+            <pattern>api/adidentity/*</pattern>
+        </patterns>
+    </page-adidentity>
+</acl>

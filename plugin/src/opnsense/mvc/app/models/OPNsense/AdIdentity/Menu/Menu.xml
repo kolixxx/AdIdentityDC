@@ -1,0 +1,7 @@
+<menu>
+    <Firewall>
+        <AdIdentity cssClass="fa fa-users" order="90">
+            <Settings url="/ui/adidentity" order="10"/>
+        </AdIdentity>
+    </Firewall>
+</menu>

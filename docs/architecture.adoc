@@ -1,0 +1,295 @@
+= Architecture
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Цель архитектуры
+
+Построить надёжный контур:
+
+[source]
+----
+AD login/auth event
+  -> user + ip
+  -> LDAP groups
+  -> session state
+  -> OPNsense aliases
+  -> admin firewall rules
+----
+
+Firewall остаётся IP-based. Identity добавляется через динамические Aliases.
+
+== Логическая схема
+
+[source]
+----
+[User] --login--> [Domain PC]
+                      |
+                      | Kerberos/NTLM auth
+                      v
+              [AD Domain Controller]
+                 |              |
+                 | Event Log    | LDAP
+                 v              v
+            +-------------------------+
+            |     Windows Agent       |
+            |  - event collector      |
+            |  - ldap enricher        |
+            |  - session store        |
+            |  - push + API           |
+            +------------+------------+
+                         |
+                         | HTTPS (push / resync)
+                         v
+            +-------------------------+
+            |    OPNsense Plugin      |
+            |  - session projection   |
+            |  - alias manager        |
+            |  - UI / settings        |
+            +------------+------------+
+                         |
+                         v
+                 Group/User Aliases
+                         |
+                         v
+              Firewall Rules (admin)
+----
+
+== Компоненты
+
+=== Windows Agent
+
+Рекомендуемая форма: **Windows Service** на Domain Controller.
+
+Ответственность:
+
+* подписка/чтение Security Event Log;
+* извлечение `user + ip` из релевантных событий;
+* обогащение группами через LDAP;
+* хранение локального session state;
+* push изменений в Plugin;
+* предоставление API для health и full sync.
+
+Agent является **source of truth** по сессиям в рамках пилота (1 DC).
+
+=== OPNsense Plugin
+
+Ответственность:
+
+* приём session upsert/remove;
+* хранение локальной проекции сессий;
+* создание и обновление Aliases;
+* UI настроек (группы, TTL, user-aliases toggle, token и т.д.);
+* resync у Agent после рестарта/потере state.
+
+Plugin **не** является источником истины по login-событиям и **не** пишет firewall rules.
+
+=== Aliases
+
+* Group alias: имя = группа AD (или нормализованное имя), содержимое = список IP.
+* User alias (optional): имя = пользователь/префикс+пользователь, содержимое = обычно 1 IP.
+
+Администратор ссылается на эти aliases в Firewall Rules.
+
+== Потоки данных
+
+=== Основной поток (push)
+
+. На DC появляется auth/login event.
+. Agent фильтрует событие и извлекает `user`, `ip`.
+. Agent через LDAP получает groups.
+. Agent обновляет локальный session store.
+. Agent отправляет `session.upsert` в Plugin.
+. Plugin обновляет внутренний state и aliases (`add`/`delete` IP).
+
+=== Resync поток (pull)
+
+. Plugin стартует или обнаруживает рассинхрон.
+. Plugin вызывает `GET /sessions` у Agent.
+. Получает полный snapshot.
+. Пересобирает aliases до согласованного состояния.
+
+=== Удаление/истечение сессии
+
+. TTL истёк, или получен явный remove, или IP пользователя сменился.
+. Agent/Plugin удаляет старую привязку.
+. Из group/user aliases удаляется соответствующий IP.
+
+== Источники identity на DC
+
+=== Event Log
+
+Для пилота:
+
+[cols="1,2,2"]
+|===
+|Event ID |Назначение |Рекомендация v1
+
+|4768
+|Kerberos TGT request (`user` + Client Address)
+|Основной источник
+
+|4624
+|Successful logon
+|Дополнительно; с фильтром Logon Type
+
+|4776
+|NTLM authentication
+|Опционально, если NTLM ещё используется
+|===
+
+=== Logon Type (для 4624)
+
+Брать:
+
+* `10` RemoteInteractive (RDP);
+* при необходимости позже аккуратно `2` Interactive.
+
+Не брать вслепую:
+
+* `3` Network (очень шумно);
+* `4` Batch;
+* `5` Service;
+* `7` Unlock (обычно не нужен для firewall identity).
+
+=== Обязательные фильтры Agent
+
+Игнорировать:
+
+* computer accounts (`*` заканчивается на `$`);
+* `ANONYMOUS LOGON`, `SYSTEM` и аналоги;
+* пустой IP / `-` / `127.0.0.1` / `::1`;
+* нерелевантные учётки вне целевого домена (по политике).
+
+=== LDAP
+
+Группы резолвятся отдельно от event log:
+
+* вход: username/UPN/SAM;
+* выход: список групп;
+* желательно учитывать nested groups (на следующих итерациях через `tokenGroups` или рекурсию).
+
+== Модель данных сессии
+
+Минимальная запись:
+
+[source,json]
+----
+{
+  "user": "ivanov",
+  "domain": "CORP",
+  "ip": "10.10.20.55",
+  "groups": ["Managers", "Office-Users"],
+  "event": "login",
+  "ts": "2026-08-02T15:40:00Z",
+  "dc": "dc01.corp.local",
+  "expires_at": "2026-08-02T23:40:00Z"
+}
+----
+
+Правила конфликтов (v1):
+
+* один user может иметь один актуальный IP (last-write-wins), либо ограниченный набор IP по политике;
+* один IP может временно ассоциироваться с последним успешным user mapping;
+* смена IP пользователя приводит к удалению старого IP из aliases и добавлению нового.
+
+== API между Agent и Plugin
+
+=== Направление
+
+* основной канал: **Agent -> Plugin (push)**;
+* запасной канал: **Plugin -> Agent (resync/health)**.
+
+=== Минимальные endpoints Plugin (принимает от Agent)
+
+[cols="1,2,2"]
+|===
+|Method / Path |Назначение |Тело (суть)
+
+|`POST /api/<plugin>/session/upsert`
+|Создать/обновить сессию
+|user, domain, ip, groups, ts, dc...
+
+|`POST /api/<plugin>/session/remove`
+|Удалить сессию/привязку
+|user, ip, reason
+|===
+
+=== Минимальные endpoints Agent (отдаёт Plugin)
+
+[cols="1,2"]
+|===
+|Method / Path |Назначение
+
+|`GET /api/v1/health`
+|Проверка живости агента
+
+|`GET /api/v1/sessions`
+|Полный snapshot текущих сессий
+|===
+
+=== Безопасность канала
+
+Для пилота:
+
+* shared token (Bearer) или эквивалент;
+* allowlist IP источника;
+* HTTPS.
+
+Далее:
+
+* mTLS;
+* ротация секретов;
+* аудит принятых/отклонённых событий.
+
+== Обновление Aliases в OPNsense
+
+Рекомендуемый подход:
+
+. Plugin заранее создаёт нужные aliases для monitored groups.
+. При изменениях использует точечные операции:
+* add IP в alias;
+* delete IP из alias.
+. Полная пересборка aliases — только при resync/repair.
+
+Практически это соответствует модели OPNsense `alias_util` (`add`/`delete` address).
+
+Для динамических списков удобны aliases типа host/external.
+
+== Ответственность слоёв
+
+[cols="1,2,2"]
+|===
+|Слой |Делает |Не делает
+
+|Agent
+|Детектит login/auth, резолвит groups, держит session truth
+|Не управляет firewall rules OPNsense
+
+|Plugin
+|Проецирует sessions в aliases, даёт UI/status
+|Не является AD identity provider
+
+|Администратор
+|Пишет Firewall Rules по aliases
+|Не обязан вручную поддерживать IP в group aliases
+|===
+
+== Масштабирование (после пилота)
+
+При нескольких DC:
+
+* login event может появиться на любом DC;
+* потребуется либо агент на каждом DC, либо collector-прослойка;
+* Plugin должен уметь принимать события от нескольких источников и дедуплицировать их.
+
+В v1 multi-DC **не входит** в обязательный scope.
+
+== Ключевые архитектурные решения v1
+
+* Group aliases = core.
+* User aliases = optional checkbox.
+* Agent = Windows Service (практичность важнее "dll как у вендоров").
+* 1 DC pilot first.
+* Push + resync.
+* TTL-based session aging вместо жёсткой зависимости от logoff events.

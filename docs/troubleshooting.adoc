@@ -1,0 +1,264 @@
+= Troubleshooting
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Как искать неисправность
+
+Всегда идите по цепочке и останавливайтесь на первом сломанном звене:
+
+[source]
+----
+Login on PC
+  -> Event on DC
+  -> Session in Agent
+  -> Push to Plugin
+  -> Alias updated
+  -> Firewall rule matches
+----
+
+Не начинайте с "правило firewall плохо работает", если ещё нет IP в alias.
+
+== Быстрый чеклист
+
+[cols="1,2,2"]
+|===
+|Проверка |Ожидание |Если нет
+
+|Служба Agent running
+|Running
+|Старт службы / логи установки
+
+|Plugin enabled
+|On
+|Включить в UI, сохранить
+
+|Health Agent
+|OK
+|Порт/firewall/service
+
+|Token одинаковый
+|Match
+|Синхронизировать секреты
+
+|Тестовый login даёт event
+|4768/нужный 4624 есть
+|Audit policy / фильтры
+
+|Session в Agent
+|user+ip+groups
+|Event filters / LDAP
+
+|Session в Plugin
+|Есть такая же
+|Push URL/auth/network
+
+|IP в group alias
+|Присутствует
+|Alias manager / monitored groups
+
+|Rule hit
+|Трафик матчится
+|Порядок правил / direction / interface
+|===
+
+== Проблема: пользователь залогинен, но IP нет в alias
+
+=== Возможные причины
+
+* событие отфильтровано Agent (Logon Type / computer account / empty IP);
+* группа пользователя не входит в monitored groups;
+* LDAP не вернул группу;
+* push не дошёл или отвергнут;
+* Plugin принял session, но alias update failed;
+* смотрите не тот alias/имя группы (нормализация имени).
+
+=== Что проверить
+
+. Session есть в Agent?
+. Какие groups у session?
+. Есть ли нужная группа в allowlist?
+. Есть ли ошибка push в логе Agent?
+. Есть ли session в Plugin?
+. Alias существует и какого типа?
+. Есть ли ошибка add IP?
+
+== Проблема: IP появляется с большой задержкой
+
+Возможные причины:
+
+* debounce слишком большой;
+* очередь push;
+* LDAP enrichment медленный/без cache;
+* слишком шумный event поток, Agent не успевает;
+* resync/apply занят другой операцией.
+
+Что делать:
+
+* проверить метрики queue/latency;
+* ужесточить event filters;
+* включить/проверить LDAP cache;
+* уменьшить лишний polling/resync.
+
+== Проблема: IP есть в alias, но правило не работает
+
+Это уже не identity-пайплайн, а обычный firewall troubleshooting:
+
+* порядок правил;
+* неправильный interface/direction;
+* другой source IP (NAT, не тот NIC, Wi-Fi vs LAN);
+* правило смотрит не на тот alias;
+* трафик не тот (IPv6 vs IPv4);
+* состояние старой сессии/pf table ещё не то, что ожидаете.
+
+Проверяйте фактический source IP пакета и содержимое alias в один и тот же момент.
+
+== Проблема: пользователь вышел, но доступ остался
+
+Ожидаемо для v1, если опираемся на TTL.
+
+Причины:
+
+* logoff event не используем как hard truth;
+* TTL ещё не истёк;
+* пользователь перелогинился/сессия обновилась;
+* IP всё ещё числится за ним.
+
+Что делать:
+
+* уменьшить TTL для пилота (понимая trade-off);
+* проверить, работает ли expire job;
+* вручную remove session и убедиться, что IP удаляется из alias.
+
+== Проблема: один IP "перескакивает" между пользователями
+
+Возможные причины:
+
+* общая станция / быстрая смена пользователей;
+* RDP/промежуточный хост;
+* last-write-wins сработал корректно, но ожидание было другим;
+* шумное network-logon событие привязало не того user.
+
+Что делать:
+
+* проверить, какое событие создало mapping;
+* ужесточить принимаемые Logon Type;
+* для пилота использовать выделенные тестовые ПК.
+
+== Проблема: Agent health OK, но Plugin пустой
+
+Проверьте:
+
+* Plugin URL в Agent правильный;
+* маршрут/firewall DC -> OPNsense;
+* TLS/certificate issues;
+* token mismatch;
+* Plugin endpoint path;
+* Plugin логи reject reason.
+
+Полезно руками отправить тестовый upsert (когда появится debug/tools) и посмотреть ответ.
+
+== Проблема: после reboot OPNsense aliases пустые/неполные
+
+Если используются неперсистентные/external lists или state плагина сброшен:
+
+. Проверить, что Plugin делает resync on start.
+. Проверить `GET /sessions` у Agent.
+. Проверить, что rebuild aliases завершился без ошибок.
+. Сверить count sessions Agent vs Plugin.
+
+== Проблема: LDAP ошибки / пустые groups
+
+Симптомы:
+
+* session есть (`user+ip`), groups = `[]`;
+* group aliases не заполняются.
+
+Проверить:
+
+* bind DN/password;
+* LDAPS/LDAP порт и сертификат;
+* base DN;
+* сам пользователь ищется?
+* `memberOf`/права service account;
+* не режет ли allowlist все группы.
+
+== Проблема: слишком много лишних IP в aliases
+
+Скорее всего:
+
+* принимается слишком широкий event set (особенно type `3`);
+* не фильтруются computer accounts;
+* TTL слишком большой;
+* monitored groups слишком широкие;
+* дедуп событий отсутствует.
+
+Сразу смотреть accepted vs filtered metrics и состав последних upsert.
+
+== Проблема: auth errors между Agent и Plugin
+
+Симптомы:
+
+* 401/403;
+* rejected push;
+* resync fail.
+
+Проверить:
+
+* одинаковый token;
+* не обрезан ли токен пробелами/кавычками в конфиге;
+* allowlist IP;
+* время/ skew только если используете signed requests (позже).
+
+== Проблема: multi-DC (пока вне v1)
+
+Симптомы будущего этапа:
+
+* login есть, но event на другом DC;
+* дубли сессий от разных агентов;
+* гонки last-write.
+
+Решение уровня архитектуры: collector + дедуп, а не "ещё один random hotfix".
+
+== Логи, которые смотреть в первую очередь
+
+=== Agent
+
+* старт/стоп службы;
+* event accepted/filtered;
+* LDAP success/fail;
+* push success/fail + latency;
+* session expire/remove.
+
+=== Plugin
+
+* upsert/remove received;
+* auth reject;
+* alias add/delete result;
+* resync start/end/errors;
+* config save / service enable.
+
+== Методический тест "эталонный пользователь"
+
+Держите заранее:
+
+* user `test-manager`;
+* group `Managers`;
+* отдельный тестовый ПК;
+* простое allow rule на alias `Managers`.
+
+Тогда любой сбой проверяется за 5 шагов на известном эталоне, а не на случайном боевом пользователе.
+
+== Эскалация
+
+Перед тем как менять архитектуру, соберите:
+
+* timestamp проблемы;
+* username / ip / group;
+* screenshot/list alias contents;
+* session dump Agent;
+* session dump Plugin;
+* релевантный кусок логов обоих компонентов;
+* event ID, который породил mapping (если есть).
+
+Без этого сложно отличить баг пайплайна от обычной ошибки firewall rule.

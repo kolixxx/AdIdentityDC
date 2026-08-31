@@ -1,0 +1,56 @@
+---
+description: OPNsense AD identity plugin/agent — project context and docs policy
+alwaysApply: true
+---
+
+# OPNsense Identity → Aliases Project
+
+## Read this first
+
+`PROJECT_STATE.md` in the repo root is the source of truth for the development plan:
+review verdict, known defects (D1–D15) with severity, acceptance criteria, phased backlog,
+lab parameters, and working rules.
+
+Read it before proposing architecture changes or writing code. Work by defect number,
+follow the phase order, and update that file when a defect is closed or the plan changes.
+
+## Product goal
+
+Enable OPNsense firewall rules by AD **groups** (core) and optionally by **users**, via dynamic Aliases backed by `user <-> ip <-> group` mappings from Active Directory logons.
+
+Firewall stays IP-based. Plugin does **not** create Firewall Rules — the admin does, using aliases.
+
+## Agreed architecture (v1 pilot)
+
+- Working name: **AdIdentity**; OPNsense module `OPNsense\AdIdentity`
+- **Windows Agent** (Windows Service on one DC): Security events → session state → LDAP groups → push to plugin
+- **OPNsense Plugin**: receive sessions → maintain/update **Aliases**
+- Main transport: **Agent → Plugin push**; **resync/pull** as backup (health + full snapshot)
+- Auth: shared Bearer token both ways
+- Group aliases = required; user aliases = optional plugin checkbox (default off)
+- Pilot: **one DC**; multi-DC later via collector (out of v1)
+- Events: prefer **4768**; limited **4624** (e.g. type 10); do not blindly accept type 3 noise
+- Session aging via **TTL**, not hard dependence on logoff events
+- Pilot API contract is locked in `docs/reference.adoc` (`/api/adidentity/...`, Agent `/api/v1/...`)
+- Code: `plugin/` (OPNsense\AdIdentity), `agent/` (.NET 8 Windows Service)
+- Agent done so far: Security Event Log collector + LDAP group resolver (nested groups + cache)
+- Plugin done so far: session store + pf alias projection + resync Plugin<-Agent
+- MVP logic exists, but correctness fixes D1–D4 must land before the lab test counts
+- One user = one active IP in v1 (last write wins); multi-IP per user is post-pilot
+- Docs live in `docs/*.adoc` (overview, architecture, configuration, installation, perfomance, reference, troubleshooting)
+- Lab is fixed: DC `10.0.1.99`, OPNsense `10.0.1.254` over **HTTP port 80**, Base DN `DC=internal,DC=lab`
+- Remote: `https://github.com/kolixxx/AdIdentityDC`; never commit tokens or a filled `appsettings.json`
+
+## Documentation policy
+
+- Do **not** proactively invent or bulk-fill documentation.
+- Update `docs/*.adoc` **incrementally with settled facts** as decisions are made and verified.
+- Prefer small factual patches over speculative essays.
+- Keep filename `perfomance.adoc` as-is unless the user renames it.
+- Mention docs updates only when relevant to the current task; don't start doc campaigns unprompted.
+
+## Working style for this repo
+
+- Long design discussion is welcome; implement when asked.
+- Prefer practical choices (Service over vendor-style DLL cosplay) unless the user requires otherwise.
+- When architecture decisions change, update the relevant `.adoc` factually — don't rewrite all docs by default.
