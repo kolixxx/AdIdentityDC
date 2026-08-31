@@ -168,11 +168,17 @@ Store только в памяти. Рестарт службы или reboot DC
 В дереве присутствуют `agent/src/**/bin/` и `obj/`. Перед пушем в
 `https://github.com/kolixxx/AdIdentityDC` нужен `.gitignore` (добавлен этим ревью).
 
-### D15 · L · Значение `ListenAddr` по умолчанию
+### D16 · H · OPNsense API отклоняет Bearer до SessionController
 
-В `agent/src/AdIdentity.Agent.Service/appsettings.json` стоит `127.0.0.1`,
-при котором resync со стороны OPNsense не пройдёт.
-Для развёртывания на DC нужен `+` (все интерфейсы) плюс правило Windows Firewall и, возможно, URL ACL.
+`ApiControllerBase` при наличии заголовка `Authorization` ожидает **Basic**
+(`base64(apiKey:apiSecret)`). Запрос с `Bearer <shared_token>` получает
+`{"status":401,"message":"Authentication Failed"}` от ядра, наш `authorizeAgent()`
+не вызывается. Agent push и проверка `session/list` с токеном пилота не работают.
+
+Исправление: `SessionController::beforeExecuteRoute()` принимает Bearer и проверяет
+`shared_token`; иначе вызывает `parent::beforeExecuteRoute()` (UI session / API key).
+
+Статус: исправлено в коде; нужно заново скопировать `SessionController.php` на OPNsense.
 
 ---
 
@@ -212,9 +218,14 @@ Store только в памяти. Рестарт службы или reboot DC
 ### Фаза 0 — гигиена репозитория (сейчас)
 
 - [x] `.gitignore`
-- [ ] Установить Git, `git init`, remote → `https://github.com/kolixxx/AdIdentityDC`
-- [ ] Проверить, что в коммит не попадают токены и заполненные конфиги
-- [ ] Первый коммит и push
+- [x] Git установлен, `git init`, remote → `https://github.com/kolixxx/AdIdentityDC` (публичный)
+- [x] Проверка перед пушем: из индекса убраны `backup_opnsense_31.08.2026.xml`
+      (полный конфиг файрвола с хешами паролей), `__pycache__` и `docs/lab-opnsense-internet.txt`
+      (топология стенда). Все три остаются локально и внесены в `.gitignore`
+- [x] Первый коммит и push, ветка `main`, 50 файлов
+
+Авторизация git выполняется через Git Credential Manager из состава Git for Windows;
+учётная запись Cursor к GitHub не привязывалась.
 
 Отслеживаемый `agent/src/AdIdentity.Agent.Service/appsettings.json` намеренно остаётся
 в репозитории с плейсхолдерами (`change-me`), иначе сборка из чистого клона сломается.

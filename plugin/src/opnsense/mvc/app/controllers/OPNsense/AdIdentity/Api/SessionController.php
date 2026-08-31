@@ -42,6 +42,30 @@ class SessionController extends ApiControllerBase
         return hash_equals($expected, $token);
     }
 
+    /**
+     * Agent uses Authorization: Bearer <shared_token>.
+     * Stock ApiControllerBase only accepts Basic (OPNsense API key:secret) and
+     * would reject Bearer before our actions run — so accept Bearer here first.
+     * UI / API-key clients still go through the parent path.
+     */
+    public function beforeExecuteRoute($dispatcher)
+    {
+        $header = $this->request->getHeader('Authorization');
+        if (is_string($header) && stripos($header, 'Bearer ') === 0) {
+            if ($this->authorizeAgent()) {
+                $this->logged_in_user = 'adidentity-agent';
+                return true;
+            }
+            $this->response->setStatusCode(401, 'Unauthorized');
+            $this->response->setContentType('application/json', 'UTF-8');
+            $this->response->setContent(['status' => 'failed', 'message' => 'unauthorized']);
+            $this->response->send();
+            return false;
+        }
+
+        return parent::beforeExecuteRoute($dispatcher);
+    }
+
     private function monitoredGroups(): array
     {
         $raw = (string)$this->model()->general->monitored_groups;
