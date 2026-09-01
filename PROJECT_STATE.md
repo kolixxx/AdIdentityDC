@@ -178,7 +178,18 @@ Store только в памяти. Рестарт службы или reboot DC
 Исправление: `SessionController::beforeExecuteRoute()` принимает Bearer и проверяет
 `shared_token`; иначе вызывает `parent::beforeExecuteRoute()` (UI session / API key).
 
-Статус: исправлено в коде; нужно заново скопировать `SessionController.php` на OPNsense.
+Статус: исправлено в коде, залито в GitHub (`8559a25`), на OPNsense обновлён
+`SessionController.php` через `fetch`; проверка `session/list` с Bearer → `status: ok`, `count: 0`.
+
+### D17 · H · UI всегда показывает пустые настройки после reload
+
+В `index.volt` в `mapDataToFormUI` ключ был `'#frm_general_settings'`.
+OPNsense сравнивает `form.id.split('-')[0] === data_index` **без** добавления `#`.
+Селектор не совпадает → `setFormData` не вызывается → форма всегда пустая.
+Apply/`settings/set` при этом могут сохранять в `config.xml` (Bearer вчера работал).
+
+Исправление: ключ `'frm_general_settings'` без `#`. Параллельно `agent_base_url`
+переведён с `UrlField` на `TextField` для `http://IP:port`.
 
 ---
 
@@ -254,9 +265,11 @@ Store только в памяти. Рестарт службы или reboot DC
 
 ### Фаза 2 — установка и первый прогон
 
-- [ ] **Перед установкой:** скачать `config.xml` (System → Configuration → Backups → Download)
+- [x] **Перед установкой:** скачать `config.xml` (System → Configuration → Backups → Download)
 - [ ] **Перед установкой:** снять снапшот VM OPNsense (`before-adidentity-install`, без памяти)
-- [ ] Установка Plugin на OPNsense `10.0.1.254` (ручная, по шагам)
+- [x] Установка Plugin на OPNsense `10.0.1.254` (ручная, по шагам)
+- [x] UI `/ui/adidentity` открывается, настройки сохранены (Enable, Managers, token)
+- [x] D16: Bearer auth; `GET /api/adidentity/session/list` → `status: ok`, `count: 0`
 - [ ] Установка Agent на DC `10.0.1.99`
 - [ ] Прогон по критериям приёмки, пункты 1–6
 - [ ] Зафиксировать реальные команды установки в `docs/installation.adoc` (**после** успеха, не раньше)

@@ -1,7 +1,10 @@
 <script>
     $(document).ready(function () {
+        // mapDataToFormUI keys must match the form id exactly (no leading '#').
+        // With '#frm_...', OPNsense compares id.split('-')[0] === data_index and
+        // never calls setFormData — the page always looks empty after reload.
         mapDataToFormUI({
-            '#frm_general_settings': "/api/adidentity/settings/get"
+            'frm_general_settings': "/api/adidentity/settings/get"
         }).done(function () {
             formatTokenizersUI();
             $('.selectpicker').selectpicker('refresh');

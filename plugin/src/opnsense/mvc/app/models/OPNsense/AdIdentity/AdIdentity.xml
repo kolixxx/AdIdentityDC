@@ -1,6 +1,6 @@
 <model>
     <mount>//OPNsense/adidentity</mount>
-    <description>AdIdentity — AD user/group sessions to firewall aliases</description>
+    <description>AdIdentity: AD user/group sessions to firewall aliases</description>
     <version>0.1.0</version>
     <items>
         <general>
@@ -11,7 +11,8 @@
             <shared_token type="TextField">
                 <Required>N</Required>
             </shared_token>
-            <agent_base_url type="UrlField">
+            <!-- TextField: lab uses http://IP:port; UrlField is stricter than we need -->
+            <agent_base_url type="TextField">
                 <Required>N</Required>
             </agent_base_url>
             <monitored_groups type="TextField">
