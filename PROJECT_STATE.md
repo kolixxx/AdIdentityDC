@@ -327,11 +327,14 @@ default route, правила, NAT и настройки плагина, и хр
 
 - [x] **D5** — периодическое истечение TTL
       · `session_store.py --expire` (диффом снимает истёкшие IP с pf, идемпотентен)
-      · configd-действие `[expire]`, `cron.d/adidentity.conf`
-      · `CronHelper::ensureExpireJob()` регистрирует задачу `*/2` при Apply,
+      · configd-действие `[expire]` с `description:` (иначе команда не видна в System Cron)
+      · `CronHelper::ensureExpireJob()` регистрирует задачу `*/2` при Apply;
         ошибка не роняет reconfigure — возвращается `cron_warning`
-      · проверено симуляцией: 2 истёкших сессии → 2 `delete` в pf, живая сохранена,
-        повторный вызов не трогает pf; PHP-синтаксис локально не проверялся (нет php)
+      · **лаба:** задача в GUI и в `/var/cron/tabs/nobody` (не root):
+        `*/2 * * * * configctl -d 'adidentity expire'`
+      · **лаба:** после login IP в `Managers`; через TTL+cron таблица пуста
+        без вызова `session/list` — D5 подтверждён end-to-end
+      · проверено симуляцией; PHP-синтаксис на OPNsense — OK
 - [ ] **D6** — повтор push с backoff
 - [ ] **D7** — периодический resync (выбрать одну сторону)
 - [ ] **D8** — персистентность store Agent / защита от деструктивного resync
