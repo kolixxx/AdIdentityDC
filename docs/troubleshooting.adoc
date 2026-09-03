@@ -122,13 +122,30 @@ Login on PC
 * logoff event не используем как hard truth;
 * TTL ещё не истёк;
 * пользователь перелогинился/сессия обновилась;
-* IP всё ещё числится за ним.
+* IP всё ещё числится за ним;
+* **часы DC и OPNsense расходятся** (см. ниже) — `expires_at` пишется по UTC агента, плагин сравнивает со своим UTC.
 
 Что делать:
 
 * уменьшить TTL для пилота (понимая trade-off);
 * проверить, работает ли expire job;
-* вручную remove session и убедиться, что IP удаляется из alias.
+* вручную remove session и убедиться, что IP удаляется из alias;
+* сверить UTC: на DC `[DateTimeOffset]::UtcNow`, на OPNsense `date -u` — должны совпадать в пределах секунд.
+
+== Проблема: Agent API уже без сессии, Plugin `session/list` ещё показывает
+
+Два разных API:
+
+* Agent API (`http://<dc>:8443/api/v1/...`) — store в памяти агента на DC;
+* Plugin API (`http://<opnsense>/api/adidentity/...`) — store плагина на firewall.
+
+Если Agent уже `sessions: 0`, а Plugin ещё `count: 1` с тем же `expires_at`:
+
+. Сравнить UTC на DC и OPNsense (см. выше). В лабе фиксировали сдвиг DC ≈ **+7 часов** из‑за неверной таймзоны Windows — плагин честно считал сессию ещё живой.
+. После выравнивания часов перезапустить службу Agent и сделать свежий login (старые `expires_at` в `sessions.json` могли остаться «в будущем»).
+. Проверить, что периодическое истечение зарегистрировано: `grep adidentity /var/cron/tabs/root`.
+  Если задачи нет, expire срабатывает только при обращении к store (`session-list`, upsert/remove,
+  `--reproject`) — просроченный IP останется в pf-таблице. Разово: `configctl adidentity expire`.
 
 == Проблема: один IP "перескакивает" между пользователями
 

@@ -32,9 +32,9 @@ public sealed class PluginClient : IPluginClient
             ["ip"] = session.Ip,
             ["groups"] = session.Groups,
             ["event"] = session.Event,
-            ["ts"] = session.Ts.UtcDateTime.ToString("o"),
+            ["ts"] = IsoUtc.Format(session.Ts),
             ["dc"] = session.Dc,
-            ["expires_at"] = session.ExpiresAt?.UtcDateTime.ToString("o")
+            ["expires_at"] = session.ExpiresAt is null ? null : IsoUtc.Format(session.ExpiresAt.Value)
         };
 
         using var response = await _http.PostAsJsonAsync(

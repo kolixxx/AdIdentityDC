@@ -6,7 +6,10 @@ public sealed class AgentOptions
 
     public string PluginBaseUrl { get; set; } = "https://opnsense.local";
     public string SharedToken { get; set; } = "";
-    public string ListenAddr { get; set; } = "0.0.0.0";
+    /// <summary>
+    /// HttpListener prefix host. Use "+" for all interfaces; "0.0.0.0" is not a valid prefix.
+    /// </summary>
+    public string ListenAddr { get; set; } = "+";
     public int ListenPort { get; set; } = 8443;
     public int SessionTtlSec { get; set; } = 28800;
     public List<string> MonitoredGroups { get; set; } = new();

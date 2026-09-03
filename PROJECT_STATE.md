@@ -191,6 +191,39 @@ Apply/`settings/set` при этом могут сохранять в `config.xm
 Исправление: ключ `'frm_general_settings'` без `#`. Параллельно `agent_base_url`
 переведён с `UrlField` на `TextField` для `http://IP:port`.
 
+### D18 · L · Дефолт `ListenAddr` невалиден для `HttpListener`
+
+`AgentOptions.ListenAddr` по умолчанию был `0.0.0.0`, а `AgentApiHost` строит префикс
+как `http://{ListenAddr}:{ListenPort}/`. Валидный wildcard для `HttpListener` — `+`.
+Дефект маскировался тем, что `appsettings.json` ключ перекрывает; без ключа
+API молча не поднялся бы (ошибка только в лог, служба продолжает работать).
+
+Исправление: дефолт `+`; в `appsettings.example.json` тоже `+` с пояснением.
+
+### D19 · L · Домен из 4768 и 4624 даёт два ключа для одного пользователя
+
+4768 сообщает Kerberos realm (`INTERNAL.LAB`), 4624 — короткое имя (`INTERNAL`).
+Ключ сессии `domain\user` → одна и та же учётка живёт как две записи.
+До aliases дефект не доходит (вытеснение по IP из D1 схлопывает их), но логи
+и `/api/v1/sessions` выглядят так, будто сессии дёргаются.
+
+Исправление: `SessionPipeline.NormalizeDomain` приводит домен к короткой форме
+в верхнем регистре до LDAP-запроса и до создания `Session`.
+Допущение: первая DNS-метка совпадает с NetBIOS-именем домена.
+
+### D20 · M · Рассинхрон UTC DC ↔ OPNsense ломает TTL
+
+Agent пишет `expires_at` через `DateTimeOffset.UtcNow` на DC.
+Plugin истекает сессии через `datetime.now(timezone.utc)` на OPNsense.
+В лабе DC был ≈ **+7 часов** впереди (неверная таймзона Windows): Agent API
+после TTL пустел, Plugin `session/list` ещё отдавал ту же сессию.
+
+Требование: перед пилотным прогоном UTC на DC и OPNsense совпадают
+(`[DateTimeOffset]::UtcNow` ≈ `date -u`). Зафиксировано в installation/troubleshooting.
+
+Дополнительно: `.NET` `"o"` может дать 7 дробных цифр; `parse_ts` на плагине
+обрезает до 6; Agent шлёт формат с 6 цифрами (`IsoUtc`).
+
 ---
 
 ## 3. Известные ограничения модели (не дефекты, документировать)
@@ -270,9 +303,14 @@ Apply/`settings/set` при этом могут сохранять в `config.xm
 - [x] Установка Plugin на OPNsense `10.0.1.254` (ручная, по шагам)
 - [x] UI `/ui/adidentity` открывается, настройки сохранены (Enable, Managers, token)
 - [x] D16: Bearer auth; `GET /api/adidentity/session/list` → `status: ok`, `count: 0`
-- [ ] Установка Agent на DC `10.0.1.99`
-- [ ] Прогон по критериям приёмки, пункты 1–6
-- [ ] Зафиксировать реальные команды установки в `docs/installation.adoc` (**после** успеха, не раньше)
+- [x] D18/D19: дефолт `ListenAddr` = `+`, нормализация домена в `SessionPipeline`
+- [x] Проверен `dotnet publish -r win-x64 --self-contained` — проходит, 0 warnings
+- [x] Установка Agent на DC `10.0.1.99` (служба `AdIdentityAgent` Running)
+- [x] Сквозной login `ivanov` → Plugin session + alias `Managers` + Block rule на `8.8.8.8`
+- [x] **D20:** UTC DC ≈ OPNsense; после TTL 15 мин оба API пусты, `pfctl -t Managers -T show` пуст
+- [x] Прогон по критериям приёмки, пункты 1–6
+- [x] Зафиксированы реальные команды установки в `docs/installation.adoc`
+      (раздел «Проверенная процедура (лабораторный прогон)»)
 - [ ] После успешного прогона — удалить снапшот, чтобы не рос дельта-диск
 
 Почему нужны оба вида резервной копии. Бэкап `config.xml` покрывает сеть, шлюзы, статический
@@ -287,7 +325,13 @@ default route, правила, NAT и настройки плагина, и хр
 
 ### Фаза 3 — устойчивость
 
-- [ ] **D5** — периодическое истечение TTL
+- [x] **D5** — периодическое истечение TTL
+      · `session_store.py --expire` (диффом снимает истёкшие IP с pf, идемпотентен)
+      · configd-действие `[expire]`, `cron.d/adidentity.conf`
+      · `CronHelper::ensureExpireJob()` регистрирует задачу `*/2` при Apply,
+        ошибка не роняет reconfigure — возвращается `cron_warning`
+      · проверено симуляцией: 2 истёкших сессии → 2 `delete` в pf, живая сохранена,
+        повторный вызов не трогает pf; PHP-синтаксис локально не проверялся (нет php)
 - [ ] **D6** — повтор push с backoff
 - [ ] **D7** — периодический resync (выбрать одну сторону)
 - [ ] **D8** — персистентность store Agent / защита от деструктивного resync
@@ -315,9 +359,11 @@ default route, правила, NAT и настройки плагина, и хр
 
 | Компонент | Значение | Статус |
 |---|---|---|
-| DC | `10.0.1.99` | лицензия Windows Server истекла, ожидается активация |
+| DC | `10.0.1.99` | лицензия активирована; служба Agent Running |
 | LDAP Base DN | `DC=internal,DC=lab` | подтверждено `(Get-ADDomain).DistinguishedName` |
-| LDAP для пилота | `127.0.0.1:389`, без SSL, bind пустой (Local System на DC) | решено |
+| LDAP для пилота | FQDN DC `:389`, без SSL, bind пустой (Local System на DC) | подтверждено в логе `LDAP connected` |
+| **UTC DC ≈ UTC OPNsense** | обязательное условие для TTL | в лабе ловили сдвиг DC ≈ +7 ч (неверная TZ); см. `docs/troubleshooting.adoc` |
+| Таймзона лабы | **UTC+3** (`Russian Standard Time` на DC) | решено |
 | OPNsense | `10.0.1.254`, 25.1-amd64, LAN = шлюз, доступ root | подтверждено |
 | Web GUI | **HTTP, порт 80** (не 443) | подтверждено `Test-NetConnection … -Port 80` |
 | `PluginBaseUrl` | `http://10.0.1.254` | следствие предыдущего |

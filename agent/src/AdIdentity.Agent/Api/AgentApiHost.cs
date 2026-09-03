@@ -88,9 +88,9 @@ public sealed class AgentApiHost : BackgroundService
                     ip = s.Ip,
                     groups = s.Groups,
                     @event = s.Event,
-                    ts = s.Ts.UtcDateTime.ToString("o"),
+                    ts = IsoUtc.Format(s.Ts),
                     dc = s.Dc,
-                    expires_at = s.ExpiresAt?.UtcDateTime.ToString("o")
+                    expires_at = s.ExpiresAt is null ? null : IsoUtc.Format(s.ExpiresAt.Value)
                 });
                 await WriteJsonAsync(context.Response, new { sessions }, cancellationToken);
                 return;

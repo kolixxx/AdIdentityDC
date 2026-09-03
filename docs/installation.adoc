@@ -85,6 +85,10 @@ NOTE: Точные команды пакета зависят от финаль�
 . Выбрать пилотный DC.
 . Проверить, что Security Auditing для нужных logon/account logon событий включён.
 . Подготовить LDAP service account.
+. **Выровнять время с OPNsense:** лаба — таймзона **UTC+3** (`Russian Standard Time` на Windows).
+  `[DateTimeOffset]::UtcNow` на DC и `date -u` на OPNsense должны совпадать.
+  Agent пишет `expires_at` в UTC; плагин истекает сессии по своим часам —
+  расхождение таймзоны/часов ломает TTL-тесты (Agent пуст, Plugin ещё отдаёт сессию).
 . Открыть сетевые потоки:
 * DC -> OPNsense (push);
 * OPNsense -> DC:agent-port (resync/health).
@@ -126,6 +130,206 @@ NOTE: Формат инсталлятора (MSI/сервис вручную) о
 
 Если любой шаг ломается — не расширяйте пилот, сначала чините цепочку.  
 См. также link:troubleshooting.adoc[Troubleshooting].
+
+== Проверенная процедура (лабораторный прогон)
+
+Ниже — команды, фактически отработавшие в пилотной лабе
+(DC `10.0.1.99`, домен `internal.lab`/`INTERNAL`, OPNsense `10.0.1.254` по HTTP,
+клиент `10.0.1.10`, пользователь `INTERNAL\ivanov` в группе `Managers`).
+
+=== Шаг 1. Сборка Agent на машине разработчика
+
+Публикуется self-contained — .NET на DC устанавливать не нужно.
+
+[source,powershell]
+----
+dotnet publish agent\src\AdIdentity.Agent.Service\AdIdentity.Agent.Service.csproj `
+  -c Release -r win-x64 --self-contained true -o publish\agent
+----
+
+Результат: каталог `publish\agent` (~220 файлов) с `AdIdentity.Agent.Service.exe`.
+
+=== Шаг 2. Выравнивание времени на DC
+
+Обязательно **до** первого прогона: Agent пишет `expires_at` по своим UTC,
+Plugin истекает сессии по своим. Расхождение ломает TTL (см. D20).
+
+[source,powershell]
+----
+tzutil /s "Russian Standard Time"
+w32tm /config /manualpeerlist:"time.windows.com,0x8" /syncfromflags:manual /reliable:yes /update
+Restart-Service w32time
+w32tm /resync /force
+[DateTimeOffset]::UtcNow
+----
+
+Сверить с OPNsense: `date -u`. Значения должны совпадать в пределах секунд.
+
+NOTE: `date -u` на OPNsense всегда показывает UTC и не меняется от Timezone в GUI.
+Локальное время — `date`.
+
+=== Шаг 3. Развёртывание на DC
+
+Скопировать содержимое `publish\agent` в `C:\Program Files\AdIdentity\agent`
+(`appsettings.json` должен лежать рядом с `.exe`).
+
+Заполнить `appsettings.json`:
+
+[cols="1,2"]
+|===
+|Ключ |Значение в лабе
+
+|`PluginBaseUrl`
+|`http://10.0.1.254`
+
+|`SharedToken`
+|токен из UI плагина
+
+|`ListenAddr`
+|`+` — нужен для resync Plugin -> Agent; `0.0.0.0` невалиден для `HttpListener`
+
+|`Ldap.Host`
+|FQDN контроллера домена, не `127.0.0.1` — иначе Kerberos SPN не разрешается
+
+|`Ldap.Port` / `Ldap.UseSsl`
+|`389` / `false` для пилота без LDAPS
+
+|`Ldap.BindDn` / `BindPassword`
+|пусто — Negotiate от учётки Local System на DC
+
+|`Ldap.BaseDn`
+|`DC=internal,DC=lab`
+|===
+
+WARNING: Пустой `BaseDn` не роняет агент — резолвер молча возвращает пустой список групп.
+Сессия дойдёт до плагина, но alias останется пустым.
+
+Открыть входящий порт API агента только для firewall:
+
+[source,powershell]
+----
+New-NetFirewallRule -DisplayName "AdIdentity Agent API" -Direction Inbound `
+  -Protocol TCP -LocalPort 8443 -RemoteAddress 10.0.1.254 -Action Allow
+----
+
+=== Шаг 4. Первый запуск в консоли
+
+Запускать из консоли, а не службой: логи идут на экран и видно bind LDAP.
+
+[source,powershell]
+----
+cd "C:\Program Files\AdIdentity\agent"
+.\AdIdentity.Agent.Service.exe
+----
+
+Ожидаемые строки: `Agent API listening on http://+:8443/`,
+`LDAP connected to <fqdn>:389 ssl=False`,
+и после логина пользователя — `Session upserted INTERNAL\ivanov 10.0.1.10 groups=1`.
+
+`groups=0` означает несовпадение `BaseDn`, `MonitoredGroups` или отсутствие пользователя в группе.
+
+=== Шаг 5. Регистрация службы
+
+`sc.exe` в PowerShell спотыкается на кавычках в пути с пробелами и печатает справку
+вместо создания службы. Рабочий вариант:
+
+[source,powershell]
+----
+New-Service -Name "AdIdentityAgent" `
+  -BinaryPathName "C:\Program Files\AdIdentity\agent\AdIdentity.Agent.Service.exe" `
+  -DisplayName "AdIdentity Agent" `
+  -StartupType Automatic
+
+Start-Service AdIdentityAgent
+Get-Service AdIdentityAgent
+----
+
+Перед запуском службы остановить консольный экземпляр, иначе порт 8443 занят.
+
+=== Шаг 6. Проверка обеих сторон
+
+Это два разных API двух компонентов, а не два способа спросить одно и то же.
+
+[source,powershell]
+----
+$token = "<shared-token>"
+
+# Agent API — store в памяти агента, выполнять на DC
+Invoke-RestMethod -Uri "http://127.0.0.1:8443/api/v1/health" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+# Plugin API — store плагина, выполнять с любой машины сети
+Invoke-RestMethod -Uri "http://10.0.1.254/api/adidentity/session/list" `
+  -Headers @{ Authorization = "Bearer $token" }
+----
+
+На OPNsense напрямую:
+
+[source,sh]
+----
+configctl adidentity session-list
+pfctl -t Managers -T show
+----
+
+NOTE: У alias типа External поле Content в редакторе всегда пустое — адреса живут
+в runtime pf-таблице. Смотреть `pfctl -t <alias> -T show` или колонку `Loaded#`
+в списке Firewall -> Aliases, а не Content.
+
+=== Шаг 7. Проверка TTL
+
+Сбросить состояние и прогнать цикл заново:
+
+[source,sh]
+----
+echo '{"sessions":[]}' > /var/db/adidentity/sessions.json
+configctl adidentity reproject
+----
+
+Затем свежий логин, проверка `expires_at` (= `ts` + `SessionTtlSec`),
+ожидание TTL без повторного входа и повторная проверка обоих API — должно быть пусто.
+
+=== Шаг 8. Периодическое истечение сессий (обязательно)
+
+Само по себе истечение на плагине происходит только при обращении к store:
+`session-list`, upsert/remove, `--reproject`. Без таймера просроченный IP
+остаётся в pf-таблице, и правило по группе продолжает его пропускать.
+
+Файлы, которые должны быть развёрнуты:
+
+[cols="1,2"]
+|===
+|Источник |Путь на OPNsense
+
+|`plugin/src/opnsense/cron.d/adidentity.conf`
+|`/usr/local/opnsense/cron.d/adidentity.conf`
+
+|`plugin/src/opnsense/service/conf/actions.d/actions_adidentity.conf`
+|`/usr/local/opnsense/service/conf/actions.d/actions_adidentity.conf`
+|===
+
+После копирования перечитать определения:
+
+[source,sh]
+----
+service configd restart
+configctl adidentity expire
+----
+
+Ожидаемый ответ: `{"status": "ok", "action": "expire", "count": N, "expired": M}`.
+
+Задачу cron плагин регистрирует сам при Apply (раз в 2 минуты, `origin=adidentity`).
+Если в ответе reconfigure пришло `cron_warning`, добавить вручную:
+System -> Settings -> Cron -> команда «AdIdentity: expire timed-out sessions».
+
+Проверить, что задача на месте:
+
+[source,sh]
+----
+grep adidentity /var/cron/tabs/root
+----
+
+IMPORTANT: Пробуждение клиента из сна обычно порождает новый запрос TGT (4768)
+и продлевает сессию. Для теста TTL машину не будить и не логиниться повторно.
 
 == Что нужно от администратора firewall после установки
 

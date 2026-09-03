@@ -18,8 +18,8 @@ public sealed class Session
         ip = Ip,
         groups = Groups,
         @event = Event,
-        ts = Ts.UtcDateTime.ToString("o"),
+        ts = IsoUtc.Format(Ts),
         dc = Dc,
-        expires_at = ExpiresAt?.UtcDateTime.ToString("o")
+        expires_at = ExpiresAt is null ? null : IsoUtc.Format(ExpiresAt.Value)
     };
 }

@@ -34,12 +34,26 @@ def utc_now() -> datetime:
 
 
 def parse_ts(value: str | None) -> datetime | None:
+    """Parse ISO-8601 timestamps from Agent (.NET round-trip) or Plugin.
+
+    .NET ``DateTime.ToString("o")`` can emit 7 fractional digits; some Python
+    builds accept only up to 6. Truncate the fraction so expire never silently
+    fails and leaves sessions forever.
+    """
     if not value:
         return None
+    text = str(value).strip().replace("Z", "+00:00")
+    # 2026-09-03T23:51:22.8259158+00:00 -> keep at most 6 fraction digits
+    text = re.sub(r"\.(\d{6})\d+", r".\1", text)
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
+    # A hand-edited sessions.json may lack the offset; comparing a naive value
+    # against an aware "now" would raise instead of expiring the session.
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def load_conf() -> dict[str, str]:
@@ -402,6 +416,36 @@ def list_sessions_cmd() -> dict[str, Any]:
         release_lock(lock)
 
 
+def expire_cmd() -> dict[str, Any]:
+    """Drop timed-out sessions and pull their addresses out of the pf tables.
+
+    Nothing else on the firewall triggers expiry on its own: upsert/remove/list
+    only run when the Agent pushes or someone queries the API. Without this on a
+    timer, a user who logged off keeps matching group rules indefinitely.
+    Intended to run from cron every 1-5 minutes.
+    """
+    conf = load_conf()
+    ttl = int(conf.get("session_ttl_sec") or 28800)
+    lock = acquire_lock()
+    try:
+        sessions = load_sessions()
+        keep, expired = expire_sessions(sessions, ttl)
+        if not expired:
+            return {"status": "ok", "action": "expire", "count": len(keep), "expired": 0}
+
+        proj = apply_alias_projection(sessions, keep, conf)
+        save_sessions(keep)
+        return {
+            "status": "ok",
+            "action": "expire",
+            "count": len(keep),
+            "expired": len(expired),
+            "projection": proj,
+        }
+    finally:
+        release_lock(lock)
+
+
 def reproject_cmd() -> dict[str, Any]:
     """Rebuild pf table contents from the persisted sessions.
 
@@ -445,6 +489,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="AdIdentity session store")
     parser.add_argument("--ensure-dirs", action="store_true")
     parser.add_argument("--reproject", action="store_true")
+    parser.add_argument("--expire", action="store_true")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--upsert", action="store_true")
     parser.add_argument("--remove", action="store_true")
@@ -460,6 +505,9 @@ def main() -> int:
             return 0
         if args.reproject:
             sys.stdout.write(json.dumps(reproject_cmd()))
+            return 0
+        if args.expire:
+            sys.stdout.write(json.dumps(expire_cmd()))
             return 0
         if args.list:
             sys.stdout.write(json.dumps(list_sessions_cmd()))

@@ -3,6 +3,7 @@
 namespace OPNsense\AdIdentity\Api;
 
 use OPNsense\Base\ApiMutableServiceControllerBase;
+use OPNsense\AdIdentity\CronHelper;
 use OPNsense\AdIdentity\ResyncService;
 
 class ServiceController extends ApiMutableServiceControllerBase
@@ -24,6 +25,11 @@ class ServiceController extends ApiMutableServiceControllerBase
     {
         $result = parent::reconfigureAction();
         if (($result['status'] ?? '') === 'ok') {
+            $cron = CronHelper::ensureExpireJob();
+            if (($cron['status'] ?? '') !== 'ok') {
+                $result['cron_warning'] = $cron['message'] ?? 'expire job not registered';
+            }
+
             $resync = (new ResyncService())->run();
             $result['resync'] = $resync;
             // Keep reconfigure successful even if agent is temporarily unreachable.

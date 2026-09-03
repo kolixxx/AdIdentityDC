@@ -57,7 +57,9 @@ public sealed class SessionPipeline
             return;
         }
 
-        var groups = await _groups.ResolveGroupsAsync(raw.User, raw.Domain, cancellationToken);
+        var domain = NormalizeDomain(raw.Domain);
+
+        var groups = await _groups.ResolveGroupsAsync(raw.User, domain, cancellationToken);
         if (_options.MonitoredGroups.Count > 0)
         {
             groups = groups
@@ -68,7 +70,7 @@ public sealed class SessionPipeline
         var session = new Session
         {
             User = raw.User,
-            Domain = raw.Domain,
+            Domain = domain,
             Ip = raw.Ip,
             Groups = groups,
             Event = "login",
@@ -85,6 +87,28 @@ public sealed class SessionPipeline
             session.User,
             session.Ip,
             session.Groups.Count);
+    }
+
+    /// <summary>
+    /// 4768 reports the Kerberos realm (INTERNAL.LAB) while 4624 reports the short name
+    /// (INTERNAL), which would key the same person as two sessions. Collapse to the short
+    /// upper-case form. Assumes the first DNS label matches the NetBIOS name.
+    /// </summary>
+    private static string NormalizeDomain(string domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            return "";
+        }
+
+        var trimmed = domain.Trim().TrimEnd('.');
+        var dot = trimmed.IndexOf('.');
+        if (dot > 0)
+        {
+            trimmed = trimmed[..dot];
+        }
+
+        return trimmed.ToUpperInvariant();
     }
 
     private static bool IsLocalhost(string ip) =>
