@@ -64,6 +64,7 @@ class CronHelper
 
             $backend = new Backend();
             $backend->configdRun('template reload OPNsense/Cron', true);
+            $backend->configdRun('cron restart', true);
 
             return ['status' => 'ok', 'action' => 'created'];
         } catch (\Throwable $ex) {
