@@ -31,6 +31,25 @@ class ResyncService
         }
 
         $sessions = $fetch['sessions'];
+
+        // D8: an empty agent snapshot after service restart must not wipe live aliases.
+        // Plugin expire (D5) already removes timed-out IPs; a cold agent is not authority
+        // to clear everyone who is still logged in on the wire.
+        if (count($sessions) === 0) {
+            $local = $this->countLocalSessions();
+            if ($local > 0) {
+                return [
+                    'status' => 'failed',
+                    'message' => 'refusing empty agent resync: local store still has '
+                        . $local
+                        . ' session(s). Restarted agent has not rebuilt state yet; '
+                        . 'wait for logons or restore agent sessions.json.',
+                    'local_sessions' => $local,
+                    'agent_sessions' => 0,
+                ];
+            }
+        }
+
         $aliasStats = ['created' => [], 'existing' => [], 'errors' => []];
         if ((string)$model->general->auto_create_aliases === '1') {
             $names = $this->collectAliasNames($model, $sessions);
@@ -96,6 +115,24 @@ class ResyncService
         }
 
         return ['status' => 'ok', 'sessions' => $decoded['sessions']];
+    }
+
+    private function countLocalSessions(): int
+    {
+        $backend = new Backend();
+        $raw = trim($backend->configdRun('adidentity session-list'));
+        if ($raw === '') {
+            return 0;
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return 0;
+        }
+        if (isset($decoded['count'])) {
+            return (int)$decoded['count'];
+        }
+        $sessions = $decoded['sessions'] ?? [];
+        return is_array($sessions) ? count($sessions) : 0;
     }
 
     private function collectAliasNames(AdIdentity $model, array $sessions): array

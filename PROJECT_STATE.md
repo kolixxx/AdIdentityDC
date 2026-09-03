@@ -337,7 +337,10 @@ default route, правила, NAT и настройки плагина, и хр
       · проверено симуляцией; PHP-синтаксис на OPNsense — OK
 - [ ] **D6** — повтор push с backoff
 - [ ] **D7** — периодический resync (выбрать одну сторону)
-- [ ] **D8** — персистентность store Agent / защита от деструктивного resync
+- [x] **D8** — персистентность store Agent + защита от деструктивного resync
+      · Agent: `FileSessionStore` → `%ProgramData%\AdIdentity\sessions.json`
+      · Plugin: `ResyncService` отказывает пустой replace-all, если локально ещё есть сессии
+      · критерий 8: рестарт Agent не должен обнулять aliases через Apply/Resync
 - [ ] **D10** — устранить гонку при первом создании alias
 - [ ] Прогон по критериям приёмки, пункты 7–9
 

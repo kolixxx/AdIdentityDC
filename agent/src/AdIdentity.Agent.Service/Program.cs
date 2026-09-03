@@ -23,7 +23,7 @@ var useStubLdap = builder.Configuration
     .GetSection("Ldap")
     .GetValue<bool>("UseStubResolver");
 
-builder.Services.AddSingleton<ISessionStore, InMemorySessionStore>();
+builder.Services.AddSingleton<ISessionStore, FileSessionStore>();
 if (useStubCollector)
 {
     builder.Services.AddSingleton<IEventCollector, StubEventCollector>();

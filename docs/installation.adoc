@@ -328,8 +328,20 @@ System -> Settings -> Cron -> команда «AdIdentity: expire timed-out sess
 grep adidentity /var/cron/tabs/root
 ----
 
-IMPORTANT: Пробуждение клиента из сна обычно порождает новый запрос TGT (4768)
-и продлевает сессию. Для теста TTL машину не будить и не логиниться повторно.
+=== Шаг 9. Персистентность Agent и защита resync (D8)
+
+Agent пишет сессии в `%ProgramData%\AdIdentity\sessions.json`, поэтому рестарт службы
+не обнуляет store. Параллельно Plugin **отказывает** resync с пустым снимком Agent,
+если локально ещё есть сессии — иначе Apply сразу после рестарта Agent стёр бы aliases.
+
+Проверка:
+
+. Логин тестового пользователя, IP в `Managers`.
+. На DC: `Restart-Service AdIdentityAgent`.
+. `GET http://127.0.0.1:8443/api/v1/health` — `sessions` снова >= 1 (файл подхватился).
+. На OPNsense Apply / Resync — aliases не должны опустеть; при пустом агенте
+  без локальных сессий на Agent ответ resync содержит `refusing empty agent resync`.
+
 
 == Что нужно от администратора firewall после установки
 
