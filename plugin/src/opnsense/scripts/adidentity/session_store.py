@@ -584,7 +584,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        if args.ensure_dirs:
+    if args.ensure_dirs:
             ensure_dirs()
             sys.stdout.write(json.dumps({"status": "ok"}))
             return 0
@@ -594,7 +594,7 @@ def main() -> int:
         if args.expire:
             sys.stdout.write(json.dumps(expire_cmd()))
             return 0
-        if args.list:
+    if args.list:
             sys.stdout.write(json.dumps(list_sessions_cmd()))
             return 0
         if args.upsert:
@@ -606,8 +606,8 @@ def main() -> int:
         if args.replace_all:
             sys.stdout.write(json.dumps(replace_all_sessions(decode_payload(args.payload, args.payload_b64))))
             return 0
-        parser.print_help()
-        return 1
+    parser.print_help()
+    return 1
     except Exception as exc:  # noqa: BLE001
         sys.stdout.write(json.dumps({"status": "failed", "message": str(exc)}))
         return 1
