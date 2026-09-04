@@ -390,12 +390,17 @@ default route, правила, NAT и настройки плагина, и хр
         (`PushRetryDelayMs` ×2 за попытку, потолок 30 с, `PushRetryCount` доп. попыток)
       · повторяются только транзиентные отказы: сетевые ошибки, таймаут, 5xx, 408, 429
       · 401/400 не повторяются — это ошибка конфигурации, повтор бессмыслен
+      · **лаба:** outbound block DC→OPNsense:80 → `attempt 1/4..3/4 failed; retrying`,
+        затем `Failed to handle logon event for ivanov` (SocketException 10013)
 - [x] **D7** — периодический resync (сторона выбрана: **Agent → push**)
       · `SessionReconciler` (BackgroundService) раз в `ReconcileIntervalSec` (по умолчанию 120 с)
         перепушивает все активные сессии из store с `event: refresh`
       · `expires_at` берётся из сессии, поэтому re-push **не продлевает TTL**
       · pull со стороны плагина (`Resync from Agent`) остаётся ручной кнопкой —
         по расписанию работает только одна сторона
+      · **лаба:** пока блок стоял — Plugin `count: 0`, pf пуст; после снятия блока
+        без нового логина — `Managers` = `10.0.1.10`, `event: refresh`;
+        в логе агента `Reconcile push failed` → затем `POST .../upsert ... 200`
 - [x] **D8** — персистентность store Agent + защита от деструктивного resync
       · Agent: `FileSessionStore` → `%ProgramData%\AdIdentity\sessions.json`
       · Plugin: `ResyncService` отказывает пустой replace-all, если локально ещё есть сессии
@@ -410,6 +415,7 @@ default route, правила, NAT и настройки плагина, и хр
       · таблица не читается (alias не создан) → только `add`, без `delete`
       · проверено на 5 сценариях: дрейф, steady state, лишний адрес,
         разбор вывода `pfctl` с `/32`, нечитаемая таблица
+      · **лаба:** `pfctl -T delete 10.0.1.10` → через cron IP вернулся сам
 - [ ] **D22** — сигнал активности (4769 как refresh), иначе TTL = срок с логона
 - [ ] **D10** — устранить гонку при первом создании alias
 - [ ] Прогон по критериям приёмки, пункты 7–9
