@@ -158,16 +158,17 @@ klist get cifs/<dc-fqdn>
 . Сравнить `expires_at` до и после через `configctl adidentity session-list`.
 
 Если `klist get` возвращает ошибку 1793 (`does not have a computer account for
-this workstation trust relationship`), у клиента повреждено доверие к домену.
-Это не ошибка Agent. Проверить на клиенте:
+this workstation trust relationship`), это ещё не доказывает повреждение
+доверия: текущий logon-сеанс мог быть создан по кэшированным credentials.
+Проверить на клиенте:
 
 [source,powershell]
 ----
 Test-ComputerSecureChannel -Verbose
 ----
 
-До исправления trust пользователь может входить по кэшированным credentials,
-но принудительный Kerberos-тест и часть доменной активности ненадёжны.
+`True` означает, что secure channel исправен; после logout/login можно повторить
+`klist`. При `False` сначала проверить DNS/DC, затем отдельно восстанавливать trust.
 
 Refresh намеренно игнорируется, если сессии уже нет либо IP события не совпадает
 с IP существующей сессии. 4769 не создаёт сессию и не меняет её адрес.

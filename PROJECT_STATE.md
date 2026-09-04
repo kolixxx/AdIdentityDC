@@ -290,9 +290,9 @@ alias при неудачном reload. Сессия в `sessions.json` жива
 `event: login`, затем без нового login агент несколько раз записал
 `Session refreshed from 4769 INTERNAL\ivanov 10.0.1.10`. Plugin получил
 `event: refresh`, а `expires_at` сдвинулся примерно с 11:35 до 11:38 UTC.
-Отдельно обнаружено повреждённое trust relationship у `Local-Windows-02`
-(`klist get` → ошибка 1793); это проблема стенда, refresh уже подтверждён
-другими успешно записанными 4769.
+`klist get` один раз вернул ошибку 1793, но последующая проверка на
+`Local-Windows-02` дала `Test-ComputerSecureChannel = True`; повреждение trust
+не подтверждено. Refresh подтверждён другими успешно записанными 4769.
 
 ---
 
