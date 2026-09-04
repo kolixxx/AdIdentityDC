@@ -199,10 +199,26 @@ NOTE: `date -u` на OPNsense всегда показывает UTC и не ме
 
 |`Ldap.BaseDn`
 |`DC=internal,DC=lab`
+
+|`Events.Accept4769`
+|`true` — Kerberos activity refresh для существующей сессии
+
+|`ActivityRefreshMinIntervalSec`
+|`60` — не чаще одного refresh на пользователя в минуту
 |===
 
 WARNING: Пустой `BaseDn` не роняет агент — резолвер молча возвращает пустой список групп.
 Сессия дойдёт до плагина, но alias останется пустым.
+
+На DC проверить success-аудит выдачи Kerberos service ticket:
+
+[source,powershell]
+----
+auditpol /get /subcategory:"Kerberos Service Ticket Operations"
+auditpol /set /subcategory:"Kerberos Service Ticket Operations" /success:enable
+----
+
+Без этого события 4769 не записываются в Security Log и активность не продлевает TTL.
 
 Открыть входящий порт API агента только для firewall:
 
@@ -224,7 +240,8 @@ cd "C:\Program Files\AdIdentity\agent"
 
 Ожидаемые строки: `Agent API listening on http://+:8443/`,
 `LDAP connected to <fqdn>:389 ssl=False`,
-и после логина пользователя — `Session upserted INTERNAL\ivanov 10.0.1.10 groups=1`.
+после логина — `Session upserted INTERNAL\ivanov 10.0.1.10 groups=1`,
+а при Kerberos-активности — `Session refreshed from 4769 ...`.
 
 `groups=0` означает несовпадение `BaseDn`, `MonitoredGroups` или отсутствие пользователя в группе.
 
@@ -396,6 +413,36 @@ New-NetFirewallRule -DisplayName "AdIdentity-test-block" `
 По расписанию синхронизацию ведёт только агент. Кнопка `Resync from Agent`
 в GUI плагина остаётся ручной; вешать на cron ещё и её не нужно.
 ====
+
+=== Шаг 11. Продление TTL по Kerberos-активности (D22)
+
+. Запустить Agent в консоли и сделать свежий login `ivanov`.
+. На OPNsense выполнить `configctl adidentity session-list` и записать исходный
+  `expires_at`.
+. Подождать больше `ActivityRefreshMinIntervalSec` (по умолчанию 60 с).
+. На `Local-Windows-02` явно запросить service ticket к доменному ресурсу:
++
+[source,powershell]
+----
+klist get cifs/<dc-fqdn>
+----
+. В логе агента должна появиться строка
+  `Session refreshed from 4769 INTERNAL\ivanov 10.0.1.10`.
+. Повторить `configctl adidentity session-list`: `expires_at` должен стать позже
+  исходного, а `event` — `refresh`.
+. После исходного `expires_at`, но до нового, адрес должен оставаться в
+  `pfctl -t Managers -T show`.
+
+Если `klist get` успешен, но refresh нет, проверить на DC наличие события:
+
+[source,powershell]
+----
+Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4769} -MaxEvents 3 |
+  Format-List TimeCreated, Id, Message
+----
+
+NOTE: Обычный интернет-трафик и локальная работа не обязаны создавать 4769.
+Тест проверяет активность с Kerberos-защищённым доменным сервисом.
 
 
 == Что нужно от администратора firewall после установки

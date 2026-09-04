@@ -129,6 +129,10 @@ Plugin **не** является источником истины по login-с
 |Kerberos TGT request (`user` + Client Address)
 |Основной источник
 
+|4769
+|Kerberos service ticket (`user` + Client Address)
+|Только продление существующей сессии с тем же IP
+
 |4624
 |Successful logon
 |Дополнительно; с фильтром Logon Type

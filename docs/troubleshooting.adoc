@@ -132,6 +132,34 @@ Login on PC
 * вручную remove session и убедиться, что IP удаляется из alias;
 * сверить UTC: на DC `[DateTimeOffset]::UtcNow`, на OPNsense `date -u` — должны совпадать в пределах секунд.
 
+== Проблема: пользователь работает, но сессия всё равно истекает
+
+4769 продлевает TTL только при обращении пользователя к Kerberos-защищённому
+доменному сервису. Просмотр обычных интернет-сайтов и локальная работа не видны DC.
+
+Проверить:
+
+. В `appsettings.json`: `Events.Accept4769=true`.
+. На DC:
++
+[source,powershell]
+----
+auditpol /get /subcategory:"Kerberos Service Ticket Operations"
+----
++
+Success-аудит должен быть включён.
+. После `ActivityRefreshMinIntervalSec` на клиенте:
++
+[source,powershell]
+----
+klist get cifs/<dc-fqdn>
+----
+. На DC найти событие 4769 и строку агента `Session refreshed from 4769 ...`.
+. Сравнить `expires_at` до и после через `configctl adidentity session-list`.
+
+Refresh намеренно игнорируется, если сессии уже нет либо IP события не совпадает
+с IP существующей сессии. 4769 не создаёт сессию и не меняет её адрес.
+
 == Проблема: Agent API уже без сессии, Plugin `session/list` ещё показывает
 
 Два разных API:
@@ -143,7 +171,7 @@ Login on PC
 
 . Сравнить UTC на DC и OPNsense (см. выше). В лабе фиксировали сдвиг DC ≈ **+7 часов** из‑за неверной таймзоны Windows — плагин честно считал сессию ещё живой.
 . После выравнивания часов перезапустить службу Agent и сделать свежий login (старые `expires_at` в `sessions.json` могли остаться «в будущем»).
-. Проверить, что периодическое истечение зарегистрировано: `grep adidentity /var/cron/tabs/root`.
+. Проверить, что периодическое истечение зарегистрировано: `grep adidentity /var/cron/tabs/nobody`.
   Если задачи нет, expire срабатывает только при обращении к store (`session-list`, upsert/remove,
   `--reproject`) — просроченный IP останется в pf-таблице. Разово: `configctl adidentity expire`.
 

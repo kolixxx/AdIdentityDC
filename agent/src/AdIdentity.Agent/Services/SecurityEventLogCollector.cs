@@ -10,7 +10,8 @@ namespace AdIdentity.Agent.Services;
 
 /// <summary>
 /// Reads Windows Security Event Log and emits user+ip observations.
-/// Primary: 4768 (Kerberos TGT). Optional: 4624 (filtered logon types), 4776 (NTLM).
+/// Primary: 4768 (Kerberos TGT). Activity: 4769 (Kerberos service ticket).
+/// Optional: 4624 (filtered logon types), 4776 (NTLM).
 /// </summary>
 public sealed class SecurityEventLogCollector : IEventCollector
 {
@@ -125,6 +126,7 @@ public sealed class SecurityEventLogCollector : IEventCollector
         return eventId switch
         {
             4768 when _options.Events.Accept4768 => TryParse4768(record, data, out parsed),
+            4769 when _options.Events.Accept4769 => TryParse4769(record, data, out parsed),
             4624 when _options.Events.Accept4624 => TryParse4624(record, data, out parsed),
             4776 when _options.Events.Accept4776 => TryParse4776(record, data, out parsed),
             _ => false
@@ -157,6 +159,39 @@ public sealed class SecurityEventLogCollector : IEventCollector
             Domain = string.IsNullOrWhiteSpace(domain) ? "UNKNOWN" : domain!,
             Ip = ip!,
             EventId = 4768,
+            LogonType = null,
+            Ts = record.TimeCreated?.ToUniversalTime() ?? DateTimeOffset.UtcNow,
+            Dc = record.MachineName ?? Environment.MachineName
+        };
+        return true;
+    }
+
+    private bool TryParse4769(EventRecord record, IReadOnlyDictionary<string, string> data, out RawLogonEvent? parsed)
+    {
+        parsed = null;
+
+        // Only successful service-ticket requests represent usable activity.
+        if (data.TryGetValue("Status", out var status) &&
+            !IsSuccessStatus(status))
+        {
+            return false;
+        }
+
+        var user = Get(data, "TargetUserName", "AccountName");
+        var domain = Get(data, "TargetDomainName", "AccountDomain");
+        var ip = NormalizeIp(Get(data, "IpAddress", "ClientAddress"));
+
+        if (!IsUsefulIdentity(user, ip))
+        {
+            return false;
+        }
+
+        parsed = new RawLogonEvent
+        {
+            User = user!,
+            Domain = string.IsNullOrWhiteSpace(domain) ? "UNKNOWN" : domain!,
+            Ip = ip!,
+            EventId = 4769,
             LogonType = null,
             Ts = record.TimeCreated?.ToUniversalTime() ?? DateTimeOffset.UtcNow,
             Dc = record.MachineName ?? Environment.MachineName
@@ -234,6 +269,7 @@ public sealed class SecurityEventLogCollector : IEventCollector
     {
         var ids = new List<int>();
         if (events.Accept4768) ids.Add(4768);
+        if (events.Accept4769) ids.Add(4769);
         if (events.Accept4624) ids.Add(4624);
         if (events.Accept4776) ids.Add(4776);
         if (ids.Count == 0)

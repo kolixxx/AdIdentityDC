@@ -50,6 +50,10 @@ user <-> ip  =>  Alias(user) = [ip]
 |Kerberos TGT request
 |Основной
 
+|4769
+|Kerberos service ticket request
+|Только refresh существующей сессии с тем же user + IP
+
 |4624
 |Successful logon
 |Дополнительный

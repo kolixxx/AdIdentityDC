@@ -29,6 +29,12 @@ public sealed class AgentOptions
     /// </summary>
     public int ReconcileIntervalSec { get; set; } = 120;
 
+    /// <summary>
+    /// Minimum interval between accepted activity refreshes for one session.
+    /// Limits disk writes and plugin pushes when 4769 events are frequent.
+    /// </summary>
+    public int ActivityRefreshMinIntervalSec { get; set; } = 60;
+
     public List<string> MonitoredGroups { get; set; } = new();
     public LdapOptions Ldap { get; set; } = new();
     public EventFilterOptions Events { get; set; } = new();
@@ -73,6 +79,7 @@ public sealed class EventFilterOptions
     public bool UseStubCollector { get; set; } = false;
 
     public bool Accept4768 { get; set; } = true;
+    public bool Accept4769 { get; set; } = true;
     public bool Accept4624 { get; set; } = true;
     public List<int> LogonTypes4624 { get; set; } = new() { 10 };
     public bool Accept4776 { get; set; } = false;
