@@ -315,7 +315,11 @@ service configd restart
 configctl adidentity expire
 ----
 
-Ожидаемый ответ: `{"status": "ok", "action": "expire", "count": N, "expired": M}`.
+Ожидаемый ответ: `{"status": "ok", "action": "expire", "count": N, "expired": M, "projection": {...}}`.
+
+Эта же задача на каждом проходе сверяет pf-таблицы с сохранёнными сессиями:
+читает `pfctl -t <alias> -T show`, добавляет отсутствующие адреса и снимает лишние.
+Без этого дрейф таблиц, вызванный не плагином, оставался бы незамеченным (D21).
 
 Задачу cron плагин регистрирует сам при Apply (раз в 2 минуты, `origin=adidentity`).
 Если в ответе reconfigure пришло `cron_warning`, добавить вручную:
@@ -325,8 +329,11 @@ System -> Settings -> Cron -> команда «AdIdentity: expire timed-out sess
 
 [source,sh]
 ----
-grep adidentity /var/cron/tabs/root
+grep adidentity /var/cron/tabs/nobody
 ----
+
+Ожидается строка `*/2 * * * * configctl -d 'adidentity expire'`.
+Задачи OPNsense живут в crontab пользователя `nobody`, не `root`.
 
 === Шаг 9. Персистентность Agent и защита resync (D8)
 
@@ -357,10 +364,12 @@ Agent пишет сессии в `%ProgramData%\AdIdentity\sessions.json`, по�
 перепушивает все активные сессии. `expires_at` при этом не пересчитывается,
 так что перепуш не продлевает TTL.
 
-Проверка:
+Проверка. Обрыв имитируется на стороне DC — доступность OPNsense не трогаем.
+Важно, чтобы плагин **не видел** сессию во время обрыва: тогда после
+восстановления связи возникает реальная дельта, которую отработает перепуш.
 
-Обрыв удобнее имитировать на стороне DC — не трогая доступность OPNsense.
-
+. Убедиться, что активных сессий нет:
+`configctl adidentity session-list` возвращает `count: 0`.
 . На DC заблокировать исходящий трафик к плагину:
 +
 [source,powershell]
@@ -373,6 +382,14 @@ New-NetFirewallRule -DisplayName "AdIdentity-test-block" `
 . Снять блокировку: `Remove-NetFirewallRule -DisplayName "AdIdentity-test-block"`.
 . Не выполняя новых логинов, подождать до `ReconcileIntervalSec`.
 . `pfctl -t Managers -T show` — IP на месте, хотя событие пришло, пока связи не было.
+
+[WARNING]
+====
+Удаление адреса командой `pfctl -t Managers -T delete <ip>` **не** проверяет D6/D7.
+Плагин уже знает эту сессию, поэтому перепуш агента даёт нулевую дельту, отвечает
+`200` и таблицу не меняет. Такой дрейф лечит периодическая сверка на плагине (D21,
+Шаг 8), и вернётся адрес в течение двух минут именно благодаря ей, а не агенту.
+====
 
 [NOTE]
 ====

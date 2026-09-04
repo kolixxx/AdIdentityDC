@@ -197,6 +197,36 @@ def configctl_filter(op: str, alias: str, ip: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def pf_table_ips(alias: str) -> tuple[bool, set[str]]:
+    """Read what pf actually holds for an alias.
+
+    Returns (readable, addresses). A missing table is not an error here: the
+    alias may simply not exist yet.
+    """
+    try:
+        proc = subprocess.run(
+            ["/sbin/pfctl", "-t", alias, "-T", "show"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001
+        return False, set()
+    if proc.returncode != 0:
+        return False, set()
+
+    ips: set[str] = set()
+    for line in (proc.stdout or "").splitlines():
+        value = line.strip()
+        if not value:
+            continue
+        # pfctl may print host entries as 10.0.1.10/32
+        value = re.sub(r"/(32|128)$", "", value)
+        ips.add(value)
+    return True, ips
+
+
 def desired_alias_ips(sessions: list[dict[str, Any]], conf: dict[str, str]) -> dict[str, set[str]]:
     groups_allow = monitored_groups(conf)
     enable_user = conf.get("enable_user_aliases", "0") in ("1", "true", "True", "yes")
@@ -252,6 +282,60 @@ def apply_alias_projection(
         "aliases_touched": sorted(all_aliases),
         "ips_added": added,
         "ips_removed": removed,
+        "errors": errors,
+    }
+
+
+def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) -> dict[str, Any]:
+    """Bring pf tables in line with the stored sessions, whatever pf holds now.
+
+    ``apply_alias_projection`` only emits the difference between two states the
+    plugin knows about, so drift it did not cause stays invisible: a flushed
+    table, an alias recreated in the GUI, a manual ``pfctl -T delete``. Group
+    rules then silently stop matching for a user who is logged on.
+    Compare against the live table instead and repair both directions.
+    """
+    desired = desired_alias_ips(sessions, conf)
+    # Include configured group aliases with no sessions left, so leftover
+    # addresses in an alias that should now be empty are still cleaned up.
+    aliases = set(desired) | {normalize_alias_name(g) for g in monitored_groups(conf)}
+
+    added = removed = 0
+    errors: list[str] = []
+    unreadable: list[str] = []
+
+    for alias in sorted(aliases):
+        want = desired.get(alias, set())
+        readable, have = pf_table_ips(alias)
+        if not readable:
+            # Unknown current content: only add, never delete on a guess.
+            if want:
+                unreadable.append(alias)
+            else:
+                continue
+
+        for ip in sorted(want - have):
+            ok, msg = configctl_filter("add", alias, ip)
+            if ok:
+                added += 1
+            else:
+                errors.append(f"add {alias} {ip}: {msg or 'failed (alias missing?)'}")
+
+        if not readable:
+            continue
+
+        for ip in sorted(have - want):
+            ok, msg = configctl_filter("delete", alias, ip)
+            if ok:
+                removed += 1
+            else:
+                errors.append(f"delete {alias} {ip}: {msg or 'failed'}")
+
+    return {
+        "aliases_checked": sorted(aliases),
+        "ips_added": added,
+        "ips_removed": removed,
+        "unreadable_tables": unreadable,
         "errors": errors,
     }
 
@@ -417,11 +501,14 @@ def list_sessions_cmd() -> dict[str, Any]:
 
 
 def expire_cmd() -> dict[str, Any]:
-    """Drop timed-out sessions and pull their addresses out of the pf tables.
+    """Drop timed-out sessions, then reconcile pf tables with what remains.
 
     Nothing else on the firewall triggers expiry on its own: upsert/remove/list
     only run when the Agent pushes or someone queries the API. Without this on a
     timer, a user who logged off keeps matching group rules indefinitely.
+
+    The reconcile pass runs every time, not only when something expired, because
+    pf tables can drift for reasons the plugin never sees.
     Intended to run from cron every 1-5 minutes.
     """
     conf = load_conf()
@@ -430,17 +517,15 @@ def expire_cmd() -> dict[str, Any]:
     try:
         sessions = load_sessions()
         keep, expired = expire_sessions(sessions, ttl)
-        if not expired:
-            return {"status": "ok", "action": "expire", "count": len(keep), "expired": 0}
+        if expired:
+            save_sessions(keep)
 
-        proj = apply_alias_projection(sessions, keep, conf)
-        save_sessions(keep)
         return {
             "status": "ok",
             "action": "expire",
             "count": len(keep),
             "expired": len(expired),
-            "projection": proj,
+            "projection": reconcile_pf_tables(keep, conf),
         }
     finally:
         release_lock(lock)
@@ -461,8 +546,8 @@ def reproject_cmd() -> dict[str, Any]:
         keep, expired = expire_sessions(sessions, ttl)
         if expired:
             save_sessions(keep)
-        # Treat pf as empty: project every active IP rather than a diff.
-        proj = apply_alias_projection([], keep, conf)
+        # Compare against live pf content rather than a diff of known states.
+        proj = reconcile_pf_tables(keep, conf)
         return {
             "status": "ok",
             "action": "reproject",
