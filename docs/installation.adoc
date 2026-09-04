@@ -347,6 +347,15 @@ service configd restart
 configctl adidentity expire
 ----
 
+IMPORTANT: После любого копирования или `git pull` проверять, что Python-скрипты
+компилируются — синтаксическая ошибка выключает плагин целиком (`session-list`,
+upsert, expire, reproject), а в API это видно только как пустой ответ backend:
++
+[source,sh]
+----
+python3 -m py_compile /usr/local/opnsense/scripts/adidentity/session_store.py && echo OK
+----
+
 Ожидаемый ответ: `{"status": "ok", "action": "expire", "count": N, "expired": M, "projection": {...}}`.
 
 Эта же задача на каждом проходе сверяет pf-таблицы с сохранёнными сессиями:

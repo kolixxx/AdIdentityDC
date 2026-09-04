@@ -28,6 +28,9 @@ SESSIONS_FILE = DB_DIR / "sessions.json"
 LOCK_FILE = DB_DIR / "sessions.lock"
 CONF_FILE = Path("/usr/local/etc/adidentity.conf")
 
+# How long to wait for pf to publish a table for a just-created alias (D10).
+TABLE_WAIT_SEC = 3.0
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -227,6 +230,25 @@ def pf_table_ips(alias: str) -> tuple[bool, set[str]]:
     return True, ips
 
 
+def wait_for_table(alias: str, timeout_sec: float = TABLE_WAIT_SEC) -> bool:
+    """Wait until pf actually holds the table for an alias (D10).
+
+    A freshly created External alias lands in config.xml before the filter
+    reload finishes. Adding an address in that window does not stick to the
+    ruleset, and the address is lost with only an entry in ``errors``.
+    Bounded wait, so a genuinely absent alias reports instead of hanging;
+    the periodic reconcile picks it up on a later pass.
+    """
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    while True:
+        readable, _ = pf_table_ips(alias)
+        if readable:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+
+
 def desired_alias_ips(sessions: list[dict[str, Any]], conf: dict[str, str]) -> dict[str, set[str]]:
     groups_allow = monitored_groups(conf)
     enable_user = conf.get("enable_user_aliases", "0") in ("1", "true", "True", "yes")
@@ -265,7 +287,16 @@ def apply_alias_projection(
     for alias in sorted(all_aliases):
         old_ips = before.get(alias, set())
         new_ips = after.get(alias, set())
-        for ip in sorted(new_ips - old_ips):
+        to_add = sorted(new_ips - old_ips)
+        # An alias created moments ago may not be in pf yet (D10). Adding to an
+        # unknown table would not stick, so wait briefly and skip if it never
+        # appears - the periodic reconcile retries.
+        if to_add and not wait_for_table(alias):
+            errors.append(
+                f"add {alias}: pf table not ready, deferred {len(to_add)} address(es)"
+            )
+            to_add = []
+        for ip in to_add:
             ok, msg = configctl_filter("add", alias, ip)
             if ok:
                 added += 1
@@ -307,6 +338,10 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
     for alias in sorted(aliases):
         want = desired.get(alias, set())
         readable, have = pf_table_ips(alias)
+        if not readable and want:
+            # The alias may have been created just now (D10); give pf a moment.
+            if wait_for_table(alias):
+                readable, have = pf_table_ips(alias)
         if not readable:
             # Unknown current content: only add, never delete on a guess.
             if want:
@@ -584,7 +619,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-    if args.ensure_dirs:
+        if args.ensure_dirs:
             ensure_dirs()
             sys.stdout.write(json.dumps({"status": "ok"}))
             return 0
@@ -594,7 +629,7 @@ def main() -> int:
         if args.expire:
             sys.stdout.write(json.dumps(expire_cmd()))
             return 0
-    if args.list:
+        if args.list:
             sys.stdout.write(json.dumps(list_sessions_cmd()))
             return 0
         if args.upsert:
@@ -606,8 +641,8 @@ def main() -> int:
         if args.replace_all:
             sys.stdout.write(json.dumps(replace_all_sessions(decode_payload(args.payload, args.payload_b64))))
             return 0
-    parser.print_help()
-    return 1
+        parser.print_help()
+        return 1
     except Exception as exc:  # noqa: BLE001
         sys.stdout.write(json.dumps({"status": "failed", "message": str(exc)}))
         return 1

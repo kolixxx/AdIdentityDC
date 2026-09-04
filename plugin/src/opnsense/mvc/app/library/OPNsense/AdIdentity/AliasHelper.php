@@ -80,9 +80,14 @@ class AliasHelper
                 $model->serializeToConfig();
                 $cfg->save();
                 // Make new External aliases visible to pf / filter subsystem.
+                // These must run synchronously: the caller adds addresses to the
+                // new tables immediately afterwards, and pf rejects a table it
+                // does not know yet, losing the address (D10). configdRun's
+                // second argument is $detach, so passing true returns before
+                // the reload has happened.
                 $backend = new \OPNsense\Core\Backend();
-                $backend->configdRun('template reload OPNsense/Filter', true);
-                $backend->configdRun('filter reload', true);
+                $backend->configdRun('template reload OPNsense/Filter');
+                $backend->configdRun('filter reload');
             }
         } finally {
             $cfg->unlock();
