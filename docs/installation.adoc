@@ -149,6 +149,14 @@ dotnet publish agent\src\AdIdentity.Agent.Service\AdIdentity.Agent.Service.cspro
 
 Результат: каталог `publish\agent` (~220 файлов) с `AdIdentity.Agent.Service.exe`.
 
+Перед развёртыванием полезно прогнать автотесты — они не требуют домена
+и проверяют логику сессий, включая правила обработки 4769:
+
+[source,powershell]
+----
+dotnet test agent\AdIdentity.Agent.sln
+----
+
 === Шаг 2. Выравнивание времени на DC
 
 Обязательно **до** первого прогона: Agent пишет `expires_at` по своим UTC,

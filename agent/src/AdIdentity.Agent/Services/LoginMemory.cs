@@ -28,14 +28,28 @@ public sealed class LoginMemory
     private readonly ILogger<LoginMemory> _logger;
 
     public LoginMemory(ILogger<LoginMemory> logger)
+        : this(logger, DefaultPath())
+    {
+    }
+
+    /// <summary>
+    /// Internal so dependency injection cannot pick it and tests can redirect
+    /// the store away from ProgramData.
+    /// </summary>
+    internal LoginMemory(ILogger<LoginMemory> logger, string path)
     {
         _logger = logger;
+        _path = path;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        Load();
+    }
+
+    private static string DefaultPath()
+    {
         var dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "AdIdentity");
-        Directory.CreateDirectory(dir);
-        _path = Path.Combine(dir, "login-memory.json");
-        Load();
+        return Path.Combine(dir, "login-memory.json");
     }
 
     /// <summary>
