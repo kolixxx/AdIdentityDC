@@ -45,6 +45,7 @@ else
 builder.Services.AddHttpClient<IPluginClient, PluginClient>();
 builder.Services.AddSingleton<SessionPipeline>();
 builder.Services.AddHostedService<AgentApiHost>();
+builder.Services.AddHostedService<SessionReconciler>();
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();

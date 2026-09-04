@@ -342,6 +342,44 @@ Agent пишет сессии в `%ProgramData%\AdIdentity\sessions.json`, по�
 . На OPNsense Apply / Resync — aliases не должны опустеть; при пустом агенте
   без локальных сессий на Agent ответ resync содержит `refusing empty agent resync`.
 
+=== Шаг 10. Самовосстановление после недоступности плагина (D6/D7)
+
+Отдельной установки не требует — включено по умолчанию. В `appsettings.json` агента:
+
+[source,json]
+----
+"PushRetryCount": 3,
+"PushRetryDelayMs": 500,
+"ReconcileIntervalSec": 120
+----
+
+Агент повторяет неудачный push с экспоненциальным backoff и раз в `ReconcileIntervalSec`
+перепушивает все активные сессии. `expires_at` при этом не пересчитывается,
+так что перепуш не продлевает TTL.
+
+Проверка:
+
+Обрыв удобнее имитировать на стороне DC — не трогая доступность OPNsense.
+
+. На DC заблокировать исходящий трафик к плагину:
++
+[source,powershell]
+----
+New-NetFirewallRule -DisplayName "AdIdentity-test-block" `
+  -Direction Outbound -RemoteAddress 10.0.1.254 -Action Block
+----
+. Выполнить логин тестового пользователя на рабочей станции.
+. В логе агента — предупреждения `Plugin upsert attempt N/4 failed; retrying in ...`.
+. Снять блокировку: `Remove-NetFirewallRule -DisplayName "AdIdentity-test-block"`.
+. Не выполняя новых логинов, подождать до `ReconcileIntervalSec`.
+. `pfctl -t Managers -T show` — IP на месте, хотя событие пришло, пока связи не было.
+
+[NOTE]
+====
+По расписанию синхронизацию ведёт только агент. Кнопка `Resync from Agent`
+в GUI плагина остаётся ручной; вешать на cron ещё и её не нужно.
+====
+
 
 == Что нужно от администратора firewall после установки
 

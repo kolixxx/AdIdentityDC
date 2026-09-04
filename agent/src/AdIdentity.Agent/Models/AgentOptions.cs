@@ -12,6 +12,23 @@ public sealed class AgentOptions
     public string ListenAddr { get; set; } = "+";
     public int ListenPort { get; set; } = 8443;
     public int SessionTtlSec { get; set; } = 28800;
+
+    /// <summary>
+    /// Extra attempts when a push to the plugin fails transiently (0 disables retry).
+    /// </summary>
+    public int PushRetryCount { get; set; } = 3;
+
+    /// <summary>
+    /// First backoff step in milliseconds; doubles per attempt.
+    /// </summary>
+    public int PushRetryDelayMs { get; set; } = 500;
+
+    /// <summary>
+    /// Re-push all active sessions this often (seconds); 0 disables.
+    /// Recovers state the plugin missed while it was unreachable.
+    /// </summary>
+    public int ReconcileIntervalSec { get; set; } = 120;
+
     public List<string> MonitoredGroups { get; set; } = new();
     public LdapOptions Ldap { get; set; } = new();
     public EventFilterOptions Events { get; set; } = new();

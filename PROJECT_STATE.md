@@ -335,12 +335,22 @@ default route, правила, NAT и настройки плагина, и хр
       · **лаба:** после login IP в `Managers`; через TTL+cron таблица пуста
         без вызова `session/list` — D5 подтверждён end-to-end
       · проверено симуляцией; PHP-синтаксис на OPNsense — OK
-- [ ] **D6** — повтор push с backoff
-- [ ] **D7** — периодический resync (выбрать одну сторону)
+- [x] **D6** — повтор push с backoff
+      · `PluginClient.PostWithRetryAsync`: экспоненциальный backoff
+        (`PushRetryDelayMs` ×2 за попытку, потолок 30 с, `PushRetryCount` доп. попыток)
+      · повторяются только транзиентные отказы: сетевые ошибки, таймаут, 5xx, 408, 429
+      · 401/400 не повторяются — это ошибка конфигурации, повтор бессмыслен
+- [x] **D7** — периодический resync (сторона выбрана: **Agent → push**)
+      · `SessionReconciler` (BackgroundService) раз в `ReconcileIntervalSec` (по умолчанию 120 с)
+        перепушивает все активные сессии из store с `event: refresh`
+      · `expires_at` берётся из сессии, поэтому re-push **не продлевает TTL**
+      · pull со стороны плагина (`Resync from Agent`) остаётся ручной кнопкой —
+        по расписанию работает только одна сторона
 - [x] **D8** — персистентность store Agent + защита от деструктивного resync
       · Agent: `FileSessionStore` → `%ProgramData%\AdIdentity\sessions.json`
       · Plugin: `ResyncService` отказывает пустой replace-all, если локально ещё есть сессии
-      · критерий 8: рестарт Agent не должен обнулять aliases через Apply/Resync
+      · **лаба:** Restart-Service → health `sessions: 1`, файл на диске;
+        `pfctl` после рестарта / Apply / Resync — `10.0.1.10` на месте (критерий 8)
 - [ ] **D10** — устранить гонку при первом создании alias
 - [ ] Прогон по критериям приёмки, пункты 7–9
 

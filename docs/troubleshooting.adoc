@@ -175,6 +175,24 @@ Login on PC
 
 Полезно руками отправить тестовый upsert (когда появится debug/tools) и посмотреть ответ.
 
+Если плагин был недоступен временно, состояние должно догнаться само: агент повторяет
+push с backoff, а раз в `ReconcileIntervalSec` перепушивает все активные сессии.
+В логе агента это видно так:
+
+[source,text]
+----
+warn  Plugin upsert attempt 1/4 failed; retrying in 00:00:00.5000000
+info  Plugin upsert succeeded on attempt 2
+info  Session reconcile every 00:02:00
+warn  Session reconcile: 3 pushed, 1 failed
+----
+
+Если строки `Session reconcile every ...` нет вообще — в `appsettings.json`
+стоит `ReconcileIntervalSec: 0`, самовосстановление выключено.
+
+Если повторов не видно и push падает сразу — отказ не транзиентный.
+`401` (токен) и `400` (payload) намеренно не повторяются, их надо чинить в конфигурации.
+
 == Проблема: после reboot OPNsense aliases пустые/неполные
 
 Если используются неперсистентные/external lists или state плагина сброшен:

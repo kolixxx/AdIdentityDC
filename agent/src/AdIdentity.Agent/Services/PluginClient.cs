@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using AdIdentity.Agent.Abstractions;
@@ -9,6 +10,8 @@ namespace AdIdentity.Agent.Services;
 
 public sealed class PluginClient : IPluginClient
 {
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
+
     private readonly HttpClient _http;
     private readonly AgentOptions _options;
     private readonly ILogger<PluginClient> _logger;
@@ -23,7 +26,7 @@ public sealed class PluginClient : IPluginClient
             new AuthenticationHeaderValue("Bearer", _options.SharedToken);
     }
 
-    public async Task UpsertAsync(Session session, CancellationToken cancellationToken)
+    public Task UpsertAsync(Session session, CancellationToken cancellationToken)
     {
         var payload = new Dictionary<string, object?>
         {
@@ -37,20 +40,10 @@ public sealed class PluginClient : IPluginClient
             ["expires_at"] = session.ExpiresAt is null ? null : IsoUtc.Format(session.ExpiresAt.Value)
         };
 
-        using var response = await _http.PostAsJsonAsync(
-            "api/adidentity/session/upsert",
-            payload,
-            cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError("Plugin upsert failed: {Status} {Body}", (int)response.StatusCode, body);
-            response.EnsureSuccessStatusCode();
-        }
+        return PostWithRetryAsync("api/adidentity/session/upsert", payload, "upsert", cancellationToken);
     }
 
-    public async Task RemoveAsync(string user, string domain, string ip, string reason, CancellationToken cancellationToken)
+    public Task RemoveAsync(string user, string domain, string ip, string reason, CancellationToken cancellationToken)
     {
         var payload = new
         {
@@ -60,16 +53,74 @@ public sealed class PluginClient : IPluginClient
             reason
         };
 
-        using var response = await _http.PostAsJsonAsync(
-            "api/adidentity/session/remove",
-            payload,
-            cancellationToken);
+        return PostWithRetryAsync("api/adidentity/session/remove", payload, "remove", cancellationToken);
+    }
 
-        if (!response.IsSuccessStatusCode)
+    /// <summary>
+    /// Retry transient failures with exponential backoff. A single lost event would
+    /// otherwise never reach the plugin, since nothing replays it until the next logon.
+    /// Rejections caused by configuration (auth, bad payload) are not retried.
+    /// </summary>
+    private async Task PostWithRetryAsync(
+        string path,
+        object payload,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        var attempts = 1 + Math.Max(0, _options.PushRetryCount);
+        var delay = TimeSpan.FromMilliseconds(Math.Max(1, _options.PushRetryDelayMs));
+
+        for (var attempt = 1; ; attempt++)
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError("Plugin remove failed: {Status} {Body}", (int)response.StatusCode, body);
-            response.EnsureSuccessStatusCode();
+            try
+            {
+                using var response = await _http.PostAsJsonAsync(path, payload, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    if (attempt > 1)
+                    {
+                        _logger.LogInformation(
+                            "Plugin {Operation} succeeded on attempt {Attempt}", operation, attempt);
+                    }
+
+                    return;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                var status = (int)response.StatusCode;
+                if (!IsTransient(response.StatusCode) || attempt >= attempts)
+                {
+                    _logger.LogError(
+                        "Plugin {Operation} failed: {Status} {Body}", operation, status, body);
+                    response.EnsureSuccessStatusCode();
+                    return;
+                }
+
+                _logger.LogWarning(
+                    "Plugin {Operation} attempt {Attempt}/{Attempts} got {Status}; retrying in {Delay}",
+                    operation, attempt, attempts, status, delay);
+            }
+            catch (Exception ex) when (IsTransient(ex) && attempt < attempts)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Plugin {Operation} attempt {Attempt}/{Attempts} failed; retrying in {Delay}",
+                    operation, attempt, attempts, delay);
+            }
+
+            await Task.Delay(delay, cancellationToken);
+            var next = delay * 2;
+            delay = next > MaxBackoff ? MaxBackoff : next;
         }
     }
+
+    private static bool IsTransient(HttpStatusCode status) =>
+        (int)status >= 500 ||
+        status == HttpStatusCode.RequestTimeout ||
+        status == HttpStatusCode.TooManyRequests;
+
+    private static bool IsTransient(Exception ex) =>
+        ex is HttpRequestException ||
+        ex is TimeoutException ||
+        (ex is TaskCanceledException tce && tce.InnerException is TimeoutException);
 }
