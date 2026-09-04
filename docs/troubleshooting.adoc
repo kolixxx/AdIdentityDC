@@ -148,11 +148,22 @@ auditpol /get /subcategory:"Kerberos Service Ticket Operations"
 ----
 +
 Success-аудит должен быть включён.
+. Есть ли нужный билет уже в кэше клиента:
++
+[source,powershell]
+----
+klist
+----
++
+Service ticket живёт около 10 часов. Пока он в кэше, обращение к тому же ресурсу
+к KDC не идёт и **нового 4769 не создаёт** — это самая частая причина «активность
+есть, а refresh нет». Для проверки кэш надо сбросить: `klist purge`.
 . После `ActivityRefreshMinIntervalSec` на клиенте:
 +
 [source,powershell]
 ----
-klist get cifs/<dc-fqdn>
+klist purge
+dir \\internal.lab\netlogon
 ----
 . На DC найти событие 4769 и строку агента `Session refreshed from 4769 ...`.
 . Сравнить `expires_at` до и после через `configctl adidentity session-list`.

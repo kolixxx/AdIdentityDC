@@ -462,22 +462,66 @@ NOTE: Обычный интернет-трафик и локальная раб�
 === Шаг 12. Восстановление истёкшей сессии по активности (D23)
 
 Проверяет, что человек, продолжающий работать, возвращает доступ без нового
-интерактивного входа, а делегирование при этом ничего не создаёт.
+интерактивного входа.
 
-. Убедиться, что `ActivityRecreateEnabled=true` и `LoginMemoryHours` больше TTL.
-. Сделать login `ivanov`, дождаться появления адреса в `pfctl -t Managers -T show`.
-. Дать сессии истечь: подождать `SessionTtlSec` **без** запросов service ticket
-  (для короткого теста удобно временно выставить `SessionTtlSec=180`).
-  `configctl adidentity session-list` должен дать `count: 0`, таблица — пустая.
-. Не выходя из учётки, на `Local-Windows-02` выполнить `klist get cifs/<dc-fqdn>`.
-. В логе агента ожидается
-  `Session restored from 4769 for remembered logon INTERNAL\ivanov 10.0.1.10`,
-  а адрес должен вернуться в `pfctl -t Managers -T show`.
-. Негативная проверка: удалить `%ProgramData%\AdIdentity\login-memory.json`,
-  перезапустить агент и повторить `klist get` при отсутствующей сессии.
-  Восстановления быть не должно — только `Ignoring 4769 ... no active session`
-  при `Logging:Default=Debug`.
-. Вернуть исходный `SessionTtlSec` и перезапустить службу.
+Порядок ниже отработал в лабе. Два его условия неочевидны, и без них тест
+даёт ложный результат — почему именно, объяснено после шагов.
+
+. На DC временно выставить в `appsettings.json`:
++
+[source,json]
+----
+"SessionTtlSec": 180,
+"Events": {
+  "Accept4768": false,
+  "Accept4624": false,
+  "Accept4769": true
+}
+----
++
+`ActivityRecreateEnabled` и `LoginMemoryHours` можно не указывать — сработают
+значения по умолчанию (`true` и `24`).
+. Перед выключением событий логина сделать вход `ivanov`, чтобы память логинов
+  получила запись. Проверить:
++
+[source,powershell]
+----
+Get-Content "$env:ProgramData\AdIdentity\login-memory.json"
+----
+. Выключить события логина, перезапустить агент. В логе фильтр коллектора должен
+  стать `*[System[(EventID=4769)]]`, а рядом с `Loaded 0 sessions` должно быть
+  `Loaded 1 remembered logins`.
+. Дождаться истечения TTL: `configctl adidentity session-list` даёт `count: 0`,
+  `pfctl -t Managers -T show` пуст.
+. На `Local-Windows-02`, **не выходя** из учётки `ivanov`, сбросить кэш билетов
+  и обратиться к доменному ресурсу:
++
+[source,powershell]
+----
+klist purge
+dir \\internal.lab\netlogon
+----
+. Ожидается `Session restored from 4769 for remembered logon INTERNAL\ivanov
+  10.0.1.10 groups=1` в логе агента и возврат адреса в `pfctl -t Managers -T show`.
+. Вернуть `SessionTtlSec`, `Accept4768` и `Accept4624` к рабочим значениям
+  и перезапустить службу.
+
+Почему события логина нужно отключить: обращение к `\\internal.lab` (имя домена,
+а не имя сервера) требует referral, и клиент идёт к KDC за TGT. На DC при этом
+рождается 4768 одновременно с 4769. Ветка логина срабатывает первой и создаёт
+сессию сама, после чего 4769 глушится `ActivityRefreshMinIntervalSec`. В логе
+видно `Session upserted` вместо `Session restored`, адрес возвращается —
+но проверяемый механизм при этом не работал.
+
+Почему нужен `klist purge`: service ticket кэшируется примерно на 10 часов
+(в лабе билет `cifs/<dc-fqdn>`, выданный в 02:10, действовал до 12:10). Пока он
+в кэше, повторное обращение к тому же ресурсу к KDC не идёт и **нового 4769
+не создаёт** — агент справедливо молчит. `klist purge` заодно снесёт TGT и
+вызовет 4768, но при выключенном `Accept4768` это безопасно.
+
+Негативную часть (память пуста или адрес чужой → восстановления нет) в лабе
+воспроизводить не нужно: она закрыта автотестами, включая сценарий
+делегирования, который вручную не устроить. См. `dotnet test agent\AdIdentity.Agent.sln`.
 
 
 == Что нужно от администратора firewall после установки
