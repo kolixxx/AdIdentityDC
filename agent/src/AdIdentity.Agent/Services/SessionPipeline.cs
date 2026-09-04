@@ -15,6 +15,7 @@ public sealed class SessionPipeline
     private readonly IGroupResolver _groups;
     private readonly ISessionStore _store;
     private readonly IPluginClient _plugin;
+    private readonly LoginMemory _loginMemory; // [D23 login-memory]
     private readonly AgentOptions _options;
     private readonly ILogger<SessionPipeline> _logger;
 
@@ -23,6 +24,7 @@ public sealed class SessionPipeline
         IGroupResolver groups,
         ISessionStore store,
         IPluginClient plugin,
+        LoginMemory loginMemory, // [D23 login-memory]
         IOptions<AgentOptions> options,
         ILogger<SessionPipeline> logger)
     {
@@ -30,6 +32,7 @@ public sealed class SessionPipeline
         _groups = groups;
         _store = store;
         _plugin = plugin;
+        _loginMemory = loginMemory;
         _options = options.Value;
         _logger = logger;
     }
@@ -70,13 +73,7 @@ public sealed class SessionPipeline
             return;
         }
 
-        var groups = await _groups.ResolveGroupsAsync(user, domain, cancellationToken);
-        if (_options.MonitoredGroups.Count > 0)
-        {
-            groups = groups
-                .Where(g => _options.MonitoredGroups.Contains(g, StringComparer.OrdinalIgnoreCase))
-                .ToList();
-        }
+        var groups = await ResolveMonitoredGroupsAsync(user, domain, cancellationToken);
 
         var session = new Session
         {
@@ -90,6 +87,7 @@ public sealed class SessionPipeline
             ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(_options.SessionTtlSec)
         };
 
+        _loginMemory.Remember(user, domain, raw.Ip, raw.Ts); // [D23 login-memory]
         _store.Upsert(session);
         await _plugin.UpsertAsync(session, cancellationToken);
         _logger.LogInformation(
@@ -114,6 +112,14 @@ public sealed class SessionPipeline
         // and includes service and machine activity that is not a user logon.
         if (existing is null)
         {
+            // [D23 login-memory] Restore only an address an earlier logon confirmed.
+            if (_options.ActivityRecreateEnabled &&
+                _loginMemory.Recall(user, domain, raw.Ip, _options.LoginMemoryHours))
+            {
+                await RecreateFromActivityAsync(raw, user, domain, cancellationToken);
+                return;
+            }
+
             _logger.LogDebug(
                 "Ignoring 4769 for {Domain}\\{User}: no active session",
                 domain,
@@ -162,6 +168,58 @@ public sealed class SessionPipeline
             refreshed.User,
             refreshed.Ip,
             refreshed.ExpiresAt);
+    }
+
+    /// <summary>
+    /// [D23 login-memory] Rebuild a session that timed out while the user stayed
+    /// logged on. A 4768 would otherwise not arrive until the next interactive
+    /// logon or TGT renewal, leaving an active user without access for hours.
+    /// Remove this method together with the rest of the D23 code.
+    /// </summary>
+    private async Task RecreateFromActivityAsync(
+        RawLogonEvent raw,
+        string user,
+        string domain,
+        CancellationToken cancellationToken)
+    {
+        var groups = await ResolveMonitoredGroupsAsync(user, domain, cancellationToken);
+
+        var session = new Session
+        {
+            User = user,
+            Domain = domain,
+            Ip = raw.Ip,
+            Groups = groups,
+            Event = "refresh",
+            Ts = raw.Ts,
+            Dc = raw.Dc,
+            ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(_options.SessionTtlSec)
+        };
+
+        _store.Upsert(session);
+        await _plugin.UpsertAsync(session, cancellationToken);
+        _logger.LogInformation(
+            "Session restored from 4769 for remembered logon {Domain}\\{User} {Ip} groups={GroupCount}",
+            session.Domain,
+            session.User,
+            session.Ip,
+            session.Groups.Count);
+    }
+
+    private async Task<IReadOnlyList<string>> ResolveMonitoredGroupsAsync(
+        string user,
+        string domain,
+        CancellationToken cancellationToken)
+    {
+        var groups = await _groups.ResolveGroupsAsync(user, domain, cancellationToken);
+        if (_options.MonitoredGroups.Count == 0)
+        {
+            return groups;
+        }
+
+        return groups
+            .Where(g => _options.MonitoredGroups.Contains(g, StringComparer.OrdinalIgnoreCase))
+            .ToList();
     }
 
     /// <summary>

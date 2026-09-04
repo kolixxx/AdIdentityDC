@@ -52,7 +52,8 @@ user <-> ip  =>  Alias(user) = [ip]
 
 |4769
 |Kerberos service ticket request
-|Только refresh существующей сессии с тем же user + IP
+|Refresh существующей сессии с тем же user + IP; при `ActivityRecreateEnabled`
+также восстанавливает истёкшую сессию для запомненного логона (D23)
 
 |4624
 |Successful logon

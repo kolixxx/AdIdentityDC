@@ -43,6 +43,7 @@ else
 }
 
 builder.Services.AddHttpClient<IPluginClient, PluginClient>();
+builder.Services.AddSingleton<LoginMemory>(); // [D23 login-memory]
 builder.Services.AddSingleton<SessionPipeline>();
 builder.Services.AddHostedService<AgentApiHost>();
 builder.Services.AddHostedService<SessionReconciler>();

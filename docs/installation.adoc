@@ -205,6 +205,13 @@ NOTE: `date -u` на OPNsense всегда показывает UTC и не ме
 
 |`ActivityRefreshMinIntervalSec`
 |`60` — не чаще одного refresh на пользователя в минуту
+
+|`ActivityRecreateEnabled`
+|`true` — 4769 восстанавливает истёкшую сессию для запомненного логона (D23);
+`false` отключает эту логику без пересборки
+
+|`LoginMemoryHours`
+|`24` — окно памяти логинов для D23
 |===
 
 WARNING: Пустой `BaseDn` не роняет агент — резолвер молча возвращает пустой список групп.
@@ -443,6 +450,26 @@ Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4769} -MaxEvents 3 |
 
 NOTE: Обычный интернет-трафик и локальная работа не обязаны создавать 4769.
 Тест проверяет активность с Kerberos-защищённым доменным сервисом.
+
+=== Шаг 12. Восстановление истёкшей сессии по активности (D23)
+
+Проверяет, что человек, продолжающий работать, возвращает доступ без нового
+интерактивного входа, а делегирование при этом ничего не создаёт.
+
+. Убедиться, что `ActivityRecreateEnabled=true` и `LoginMemoryHours` больше TTL.
+. Сделать login `ivanov`, дождаться появления адреса в `pfctl -t Managers -T show`.
+. Дать сессии истечь: подождать `SessionTtlSec` **без** запросов service ticket
+  (для короткого теста удобно временно выставить `SessionTtlSec=180`).
+  `configctl adidentity session-list` должен дать `count: 0`, таблица — пустая.
+. Не выходя из учётки, на `Local-Windows-02` выполнить `klist get cifs/<dc-fqdn>`.
+. В логе агента ожидается
+  `Session restored from 4769 for remembered logon INTERNAL\ivanov 10.0.1.10`,
+  а адрес должен вернуться в `pfctl -t Managers -T show`.
+. Негативная проверка: удалить `%ProgramData%\AdIdentity\login-memory.json`,
+  перезапустить агент и повторить `klist get` при отсутствующей сессии.
+  Восстановления быть не должно — только `Ignoring 4769 ... no active session`
+  при `Logging:Default=Debug`.
+. Вернуть исходный `SessionTtlSec` и перезапустить службу.
 
 
 == Что нужно от администратора firewall после установки

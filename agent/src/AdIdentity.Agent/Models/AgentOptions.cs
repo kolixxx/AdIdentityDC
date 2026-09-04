@@ -35,6 +35,19 @@ public sealed class AgentOptions
     /// </summary>
     public int ActivityRefreshMinIntervalSec { get; set; } = 60;
 
+    /// <summary>
+    /// [D23 login-memory] Allow an activity event to restore a session that already
+    /// timed out, but only for a user and address confirmed by an earlier logon.
+    /// Set to false to fall back to plain TTL from logon; see PROJECT_STATE.md.
+    /// </summary>
+    public bool ActivityRecreateEnabled { get; set; } = true;
+
+    /// <summary>
+    /// [D23 login-memory] How long a confirmed logon address stays eligible for
+    /// restore (hours). Should exceed SessionTtlSec. 0 disables the memory.
+    /// </summary>
+    public int LoginMemoryHours { get; set; } = 24;
+
     public List<string> MonitoredGroups { get; set; } = new();
     public LdapOptions Ldap { get; set; } = new();
     public EventFilterOptions Events { get; set; } = new();
