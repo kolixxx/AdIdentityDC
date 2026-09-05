@@ -84,7 +84,21 @@ internal sealed class FakeSessionStore : ISessionStore
         return session;
     }
 
-    public bool Remove(string user, string domain, string ip) => _sessions.Remove(Key(user, domain));
+    /// <summary>
+    /// Mirrors FileSessionStore: the address has to match, so a stale removal
+    /// cannot drop a session the user has already moved to another address.
+    /// </summary>
+    public bool Remove(string user, string domain, string ip)
+    {
+        var key = Key(user, domain);
+        if (!_sessions.TryGetValue(key, out var session) ||
+            !string.Equals(session.Ip, ip, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return _sessions.Remove(key);
+    }
 
     /// <summary>Force a stored session to look expired, without waiting for the TTL.</summary>
     public void ExpireAll()

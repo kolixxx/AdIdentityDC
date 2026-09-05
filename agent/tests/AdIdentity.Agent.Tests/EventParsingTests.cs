@@ -217,35 +217,17 @@ public sealed class EventParsingTests
     }
 
     [Fact]
-    public void A_4776_is_rejected_when_it_reports_a_workstation_instead_of_an_address()
+    public void An_ntlm_validation_event_is_ignored_entirely()
     {
-        // 4776 usually carries a NetBIOS name, which cannot be put in a pf table.
-        Assert.False(Parse(
-            4776,
-            out _,
-            new()
-            {
-                ["TargetUserName"] = "ivanov",
-                ["IpAddress"] = "LOCAL-WINDOWS-02"
-            },
-            options => options.Events.Accept4776 = true));
-    }
-
-    [Fact]
-    public void A_4776_with_a_real_address_is_accepted()
-    {
-        var ok = Parse(
-            4776,
-            out var parsed,
-            new()
-            {
-                ["TargetUserName"] = "ivanov",
-                ["IpAddress"] = "10.0.1.10"
-            },
-            options => options.Events.Accept4776 = true);
-
-        Assert.True(ok);
-        Assert.Equal(4776, parsed!.EventId);
+        // 4776 reports a Workstation name and never a client address, so it can
+        // never yield an address for a pf table. Support was dropped in D27
+        // instead of being left as a switch that does nothing; this pins that.
+        Assert.False(Parse(4776, out _, new()
+        {
+            ["TargetUserName"] = "ivanov",
+            ["Workstation"] = "LOCAL-WINDOWS-02",
+            ["Status"] = "0x0"
+        }));
     }
 
     [Fact]

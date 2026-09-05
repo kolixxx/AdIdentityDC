@@ -35,11 +35,6 @@
                 <MinimumValue>60</MinimumValue>
                 <Required>Y</Required>
             </session_ttl_sec>
-            <debounce_ms type="IntegerField">
-                <Default>2000</Default>
-                <MinimumValue>0</MinimumValue>
-                <Required>Y</Required>
-            </debounce_ms>
         </general>
     </items>
 </model>

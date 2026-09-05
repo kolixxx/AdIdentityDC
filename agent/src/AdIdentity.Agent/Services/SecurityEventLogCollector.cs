@@ -11,7 +11,7 @@ namespace AdIdentity.Agent.Services;
 /// <summary>
 /// Reads Windows Security Event Log and emits user+ip observations.
 /// Primary: 4768 (Kerberos TGT). Activity: 4769 (Kerberos service ticket).
-/// Optional: 4624 (filtered logon types), 4776 (NTLM).
+/// Optional: 4624 (filtered logon types).
 /// </summary>
 public sealed class SecurityEventLogCollector : IEventCollector
 {
@@ -143,7 +143,6 @@ public sealed class SecurityEventLogCollector : IEventCollector
             4768 when _options.Events.Accept4768 => TryParse4768(data, ts, dc, out parsed),
             4769 when _options.Events.Accept4769 => TryParse4769(data, ts, dc, out parsed),
             4624 when _options.Events.Accept4624 => TryParse4624(data, ts, dc, out parsed),
-            4776 when _options.Events.Accept4776 => TryParse4776(data, ts, dc, out parsed),
             _ => false
         };
     }
@@ -264,45 +263,12 @@ public sealed class SecurityEventLogCollector : IEventCollector
         return true;
     }
 
-    private bool TryParse4776(
-        IReadOnlyDictionary<string, string> data,
-        DateTimeOffset ts,
-        string dc,
-        out RawLogonEvent? parsed)
-    {
-        parsed = null;
-
-        // 4776 often has workstation name, not a reliable IP. Accept only when IP-like value exists.
-        var user = Get(data, "TargetUserName");
-        var domain = Get(data, "TargetDomainName") ?? "UNKNOWN";
-        var ip = NormalizeIp(Get(data, "IpAddress", "SourceNetworkAddress"));
-
-        // 4776 often lacks a client IP; skip unless an IP is present.
-        if (!IsUsefulIdentity(user, ip) || !LooksLikeIp(ip!))
-        {
-            return false;
-        }
-
-        parsed = new RawLogonEvent
-        {
-            User = user!,
-            Domain = domain,
-            Ip = ip!,
-            EventId = 4776,
-            LogonType = null,
-            Ts = ts,
-            Dc = dc
-        };
-        return true;
-    }
-
     private static string? BuildQuery(EventFilterOptions events)
     {
         var ids = new List<int>();
         if (events.Accept4768) ids.Add(4768);
         if (events.Accept4769) ids.Add(4769);
         if (events.Accept4624) ids.Add(4624);
-        if (events.Accept4776) ids.Add(4776);
         if (ids.Count == 0)
         {
             return null;
@@ -409,11 +375,6 @@ public sealed class SecurityEventLogCollector : IEventCollector
         }
 
         return ip;
-    }
-
-    private static bool LooksLikeIp(string value)
-    {
-        return System.Net.IPAddress.TryParse(value, out _);
     }
 
     private static bool IsSuccessStatus(string status)

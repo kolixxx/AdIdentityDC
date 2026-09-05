@@ -85,7 +85,7 @@ User aliases на тысячи пользователей:
 
 * upsert/remove rate;
 * alias add/delete rate;
-* apply/debounce delay;
+* apply delay;
 * active sessions count;
 * resync duration;
 * errors (auth, bad payload, alias update fail).
@@ -115,7 +115,14 @@ User aliases на тысячи пользователей:
 
 === Debounce обновлений aliases
 
-Копить изменения 1–3 секунды и применять пачкой:
+NOTE: **Не реализовано.** Это разбор возможной оптимизации, а не описание
+поведения. До D27 настройка `debounce_ms` присутствовала в модели и в форме
+(«Alias debounce (ms)», дефолт 2000), но её не читал ни PHP, ни Python —
+менять её не имело никакого эффекта, поэтому настройку убрали. Сейчас каждый
+`upsert`/`remove` применяет проекцию в pf немедленно. Если браться, стоит
+помнить, что задержка здесь — задержка применения прав доступа.
+
+Идея: копить изменения 1–3 секунды и применять пачкой:
 
 * несколько add/delete подряд по одной группе;
 * меньше промежуточных состояний;
@@ -176,7 +183,7 @@ Resync — по старту/алерту/ручной команде, не ка
 
 Контрмеры:
 
-* debounce;
+* debounce (не реализовано);
 * LDAP cache;
 * дедуп событий;
 * лимит concurrent alias apply.
@@ -240,9 +247,6 @@ Resync — по старту/алерту/ручной команде, не ка
 
 |LDAP cache
 |5–15 min
-
-|Alias debounce
-|1–3 sec
 
 |Main transport
 |push

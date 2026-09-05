@@ -53,7 +53,7 @@ public sealed class LoginMemory
     }
 
     /// <summary>
-    /// Record an address confirmed by a real logon event (4768/4624/4776).
+    /// Record an address confirmed by a real logon event (4768/4624).
     /// v1 keeps one address per user, matching "one user holds one active IP".
     /// </summary>
     public void Remember(string user, string domain, string ip, DateTimeOffset ts)

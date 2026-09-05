@@ -87,7 +87,6 @@ Login on PC
 
 Возможные причины:
 
-* debounce слишком большой;
 * очередь push;
 * LDAP enrichment медленный/без cache;
 * слишком шумный event поток, Agent не успевает;

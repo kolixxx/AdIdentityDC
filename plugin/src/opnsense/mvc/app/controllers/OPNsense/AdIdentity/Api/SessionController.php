@@ -159,7 +159,9 @@ class SessionController extends ApiControllerBase
             return ['status' => 'failed', 'message' => 'groups must be an array'];
         }
 
-        $allowedEvents = ['login', 'refresh', 'ip_changed'];
+        // Only what the agent actually produces: a logon, and a refresh from
+        // either Kerberos activity or the periodic re-push.
+        $allowedEvents = ['login', 'refresh'];
         if (!in_array((string)$payload['event'], $allowedEvents, true)) {
             return ['status' => 'failed', 'message' => 'invalid event'];
         }

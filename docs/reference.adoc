@@ -61,11 +61,15 @@ user <-> ip  =>  Alias(user) = [ip]
 
 |4776
 |NTLM auth
-|Опционально
+|Не поддерживается. Событие сообщает `Workstation` (NetBIOS-имя) и не содержит
+адреса клиента, поэтому сессию из него получить нельзя — поддержка убрана
+в D27, а не оставлена флагом-пустышкой
 
 |4634 / 4647
 |Logoff
-|Не опираться как на истину
+|Не используется. Выход на рабочей станции пишется в журнал **этой станции**,
+а не DC; на контроллере такие события отражают лишь разрыв сетевых логонов
+к самому DC. Старение сессий построено на TTL — см. D26
 |===
 
 == Logon Type (4624)
@@ -145,7 +149,8 @@ Auth:: `Authorization: Bearer <shared_token>` (один token на Agent <-> Plu
 
 |`event`
 |required
-|`login` \| `refresh` \| `ip_changed`
+|`login` \| `refresh` — единственные значения, которые формирует агент
+и принимает плагин
 
 |`ts`
 |required
@@ -199,7 +204,12 @@ Base:: `/api/adidentity`
 }
 ----
 
-`reason`: `ttl_expired` | `ip_changed` | `manual_remove` | `logout` | `resync`
+`reason`: `ttl_expired` | `manual_remove` | `logout` | `resync`
+
+IMPORTANT: Endpoint реализован с обеих сторон, но **агент его сегодня не
+вызывает вообще** — в production-коде есть только `upsert`. Сессия на плагине
+исчезает исключительно по TTL, поэтому перечисленные `reason` пока
+не встречаются в реальном трафике. Последствия этого разобраны в D26.
 
 === Agent API (отдаёт state)
 
@@ -278,13 +288,16 @@ Base:: `/api/v1` на хосте Agent
 
 * `user_alias_prefix` (default `u_`)
 * `auto_create_aliases` (default on)
-* `debounce_ms` (default `2000`)
 
 === Минимальный конфиг Agent
 
-* `plugin_base_url` (например `https://opnsense.corp.local`)
-* `shared_token`
-* `listen_addr` / `listen_port` (default `8443`)
+Имена — как в `appsettings.json` (секция `Agent`), совпадают со свойствами
+`AgentOptions`:
+
+* `PluginBaseUrl` (например `http://10.0.1.254` — базовый URL, путь
+  `api/adidentity/session/upsert` агент добавляет сам)
+* `SharedToken`
+* `ListenAddr` (default `+`) / `ListenPort` (default `8443`)
 * LDAP: host, bind, base DN
 * `monitored_groups`
 * `session_ttl_sec`
@@ -308,11 +321,8 @@ Base:: `/api/v1` на хосте Agent
 |TTL
 |28800 sec
 
-|Debounce
-|2000 ms
-
 |LDAP cache
-|5–15 min (agent-side)
+|600 sec (`Ldap.CacheSeconds`, agent-side)
 
 |Transport
 |push + resync-on-start
@@ -353,9 +363,6 @@ Base:: `/api/v1` на хосте Agent
 
 |`login`
 |Новая/обновлённая сессия
-
-|`ip_changed`
-|Сменился IP пользователя
 
 |`ttl_expired`
 |Сессия протухла

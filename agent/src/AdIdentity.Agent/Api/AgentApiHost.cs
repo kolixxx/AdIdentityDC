@@ -81,17 +81,9 @@ public sealed class AgentApiHost : BackgroundService
 
             if (context.Request.HttpMethod == "GET" && path.Equals("/api/v1/sessions", StringComparison.OrdinalIgnoreCase))
             {
-                var sessions = _store.GetAll().Select(s => new
-                {
-                    user = s.User,
-                    domain = s.Domain,
-                    ip = s.Ip,
-                    groups = s.Groups,
-                    @event = s.Event,
-                    ts = IsoUtc.Format(s.Ts),
-                    dc = s.Dc,
-                    expires_at = s.ExpiresAt is null ? null : IsoUtc.Format(s.ExpiresAt.Value)
-                });
+                // Same shape the agent pushes, so the plugin's resync parser and
+                // its upsert parser never drift apart.
+                var sessions = _store.GetAll().Select(s => s.ToContractPayload());
                 await WriteJsonAsync(context.Response, new { sessions }, cancellationToken);
                 return;
             }

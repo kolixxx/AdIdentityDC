@@ -26,22 +26,12 @@ public sealed class PluginClient : IPluginClient
             new AuthenticationHeaderValue("Bearer", _options.SharedToken);
     }
 
-    public Task UpsertAsync(Session session, CancellationToken cancellationToken)
-    {
-        var payload = new Dictionary<string, object?>
-        {
-            ["user"] = session.User,
-            ["domain"] = session.Domain,
-            ["ip"] = session.Ip,
-            ["groups"] = session.Groups,
-            ["event"] = session.Event,
-            ["ts"] = IsoUtc.Format(session.Ts),
-            ["dc"] = session.Dc,
-            ["expires_at"] = session.ExpiresAt is null ? null : IsoUtc.Format(session.ExpiresAt.Value)
-        };
-
-        return PostWithRetryAsync("api/adidentity/session/upsert", payload, "upsert", cancellationToken);
-    }
+    public Task UpsertAsync(Session session, CancellationToken cancellationToken) =>
+        PostWithRetryAsync(
+            "api/adidentity/session/upsert",
+            session.ToContractPayload(),
+            "upsert",
+            cancellationToken);
 
     public Task RemoveAsync(string user, string domain, string ip, string reason, CancellationToken cancellationToken)
     {

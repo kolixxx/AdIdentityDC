@@ -95,5 +95,8 @@ public sealed class EventFilterOptions
     public bool Accept4769 { get; set; } = true;
     public bool Accept4624 { get; set; } = true;
     public List<int> LogonTypes4624 { get; set; } = new() { 10 };
-    public bool Accept4776 { get; set; } = false;
+
+    // No Accept4776: NTLM validation events carry a Workstation name, never a
+    // client address, so they cannot produce a session. Support was removed in
+    // D27 rather than left as a switch that does nothing.
 }

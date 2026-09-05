@@ -47,10 +47,4 @@
         <type>text</type>
         <help>Default 28800 (8 hours).</help>
     </field>
-    <field>
-        <id>adidentity.general.debounce_ms</id>
-        <label>Alias debounce (ms)</label>
-        <type>text</type>
-        <help>Batch alias updates. Default 2000.</help>
-    </field>
 </form>

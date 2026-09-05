@@ -217,9 +217,6 @@ MonitoredGroups =
 |Согласование aging с агентом
 |как у агента или чуть больше
 
-|Debounce interval
-|Пачка apply изменений aliases
-|`1-3s`
 |===
 
 === Group aliases
