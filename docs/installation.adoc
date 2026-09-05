@@ -95,7 +95,7 @@ IMPORTANT: `--uninstall` не удаляет `/var/db/adidentity`, настро�
 
 === Первичная настройка в UI
 
-. Services -> AdIdentity.
+. Firewall -> AdIdentity -> Settings.
 . Включить сервис/приём сессий.
 . Задать:
 * shared token;

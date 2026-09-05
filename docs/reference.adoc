@@ -195,7 +195,9 @@ Base:: `/api/adidentity`
 
 |`POST /api/adidentity/service/resync`
 |ручной полный resync Plugin <- Agent (кнопка «Resync from Agent» в UI).
-Только POST
+Только POST. Auth — сессия UI или OPNsense API key (Basic), **не** Bearer
+shared token (иначе 401 от ядра). В успешном ответе при `http://` агенте
+есть `agent.transport_warning`
 |===
 
 `remove` body:

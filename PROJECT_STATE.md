@@ -1025,7 +1025,7 @@ default route, правила, NAT и настройки плагина, и хр
 
 **Уже реализовано и работает сквозным путём**, доделывать нечего:
 
-- настройка `enable_user_aliases` (чекбокс в Services → AdIdentity) и
+- настройка `enable_user_aliases` (чекбокс в Firewall → AdIdentity → Settings) и
   `user_alias_prefix` (по умолчанию `u_`), по умолчанию выключено;
 - PHP создаёт личный alias и при обычном push
   (`SessionController::ensureAliasesForPayload`), и при resync
@@ -1064,10 +1064,21 @@ default route, правила, NAT и настройки плагина, и хр
       `ApiUseHttps` для API агента, токен через переменную окружения
       · escape-hatch'и осознанные и по умолчанию выключены:
         `AllowInsecureTransport` (агент), `agent_tls_insecure` (плагин)
+      · **лаба:** плагин — галочка Skip agent certificate validation видна и
+        выключена (UI: Firewall → AdIdentity → Settings); агент с
+        `AllowInsecureTransport: false` падает с
+        `Refusing to push to http://10.0.1.254/`; с `true` стартует и пишет оба
+        предупреждения (push HTTP + API HTTP); после LDAP `localhost:389`
+        (не 636) сквозной login `ivanov` → `Managers` = `10.0.1.10`; Resync
+        из UI → `status: ok`, `fetched: 1`,
+        `transport_warning: plain HTTP: the shared token is sent in clear text`
       · **на стенде требуется** `"AllowInsecureTransport": true`, иначе агент
         не стартует на `http://10.0.1.254`
-      · в лабе не проверялось: HTTPS-путь целиком (сертификат OPNsense для
-        push, `netsh http add sslcert` для API агента)
+      · ещё не проверялось: HTTPS-путь целиком (сертификат OPNsense /
+        `netsh http add sslcert`)
+      · CLI `POST .../service/resync` с Bearer shared token даёт 401 от ядра —
+        endpoint только для UI-сессии / OPNsense API key (Basic); Bearer —
+        только `session/*`
 - [ ] Allowlist IP источника на endpoint приёма (вынесено из D9)
 - [ ] Multi-DC через коллектор
 - [ ] Несколько IP на пользователя (VPN, несколько устройств)
