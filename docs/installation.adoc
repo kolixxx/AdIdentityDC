@@ -48,28 +48,62 @@
 
 == Установка OPNsense Plugin
 
-NOTE: Точные команды пакета зависят от финального packaging. Ниже — целевой процесс.
+Установка идёт из клона репозитория скриптом `plugin/install.sh`, который
+запускается на самом firewall. Это официальный путь для пилота: собрать
+настоящий FreeBSD-пакет можно только внутри дерева `opnsense/plugins`, частью
+которого этот репозиторий не является (D12). `plugin/Makefile` оставлен именно
+для этой будущей задачи и в текущем дереве не работает.
 
-=== Вариант A. Через пакет плагина
+=== Развёртывание кода
 
-. Скопировать пакет плагина на OPNsense (или подключить репозиторий).
-. Установить пакет плагина.
-. Перейти в UI плагина.
+На OPNsense по SSH под root:
+
+[source,sh]
+----
+pkg install -y git                     # если ещё не установлен
+git clone https://github.com/kolixxx/AdIdentityDC.git /root/AdIdentityDC
+cd /root/AdIdentityDC
+./plugin/install.sh
+----
+
+Обновление на новую версию — оттуда же:
+
+[source,sh]
+----
+cd /root/AdIdentityDC && git pull && ./plugin/install.sh
+----
+
+Скрипт идемпотентен и:
+
+* проверяет синтаксис Python, PHP и XML **до** копирования — битый файл
+  отключает плагин целиком, а API отвечает пустым телом, без ошибки (D24);
+* раскладывает `plugin/src/opnsense/**` в `/usr/local/opnsense/**`
+  (18 файлов) с владельцем `root:wheel`;
+* перезапускает `configd`, который читает `actions.d` и модели только при
+  старте;
+* выполняет `configctl adidentity reproject`, потому что содержимое
+  pf-таблиц не переживает перезапуск (D2);
+* проверяет, что `configctl adidentity expire` и `session-list` отвечают.
+
+Полезные ключи: `--dry-run` (ничего не менять, показать план), `--no-reload`
+(только скопировать), `--uninstall` (снять файлы плагина).
+
+IMPORTANT: `--uninstall` не удаляет `/var/db/adidentity`, настройки в
+`config.xml` вместе с shared token, а также ваши aliases и правила firewall.
+Это сделано намеренно: переустановка не должна стирать состояние и открывать
+или закрывать трафик. Чистить их, если нужно, отдельно и осознанно.
+
+=== Первичная настройка в UI
+
+. Services -> AdIdentity.
 . Включить сервис/приём сессий.
 . Задать:
 * shared token;
 * URL Agent (для resync);
 * monitored groups;
 * user aliases = Off на старте.
-. Сохранить настройки.
+. Apply.
 . Убедиться, что плагин создаёт/готов создавать aliases.
-
-=== Вариант B. Dev/ручная установка (для разработки)
-
-. Развернуть файлы плагина в соответствующие пути OPNsense.
-. Установить/обновить меню, ACL, backend actions.
-. Перезапустить соответствующие сервисы/`configd` по необходимости.
-. Открыть UI плагина и выполнить первичную конфигурацию.
 
 === Проверка после установки Plugin
 
@@ -326,24 +360,12 @@ configctl adidentity reproject
 `session-list`, upsert/remove, `--reproject`. Без таймера просроченный IP
 остаётся в pf-таблице, и правило по группе продолжает его пропускать.
 
-Файлы, которые должны быть развёрнуты:
-
-[cols="1,2"]
-|===
-|Источник |Путь на OPNsense
-
-|`plugin/src/opnsense/cron.d/adidentity.conf`
-|`/usr/local/opnsense/cron.d/adidentity.conf`
-
-|`plugin/src/opnsense/service/conf/actions.d/actions_adidentity.conf`
-|`/usr/local/opnsense/service/conf/actions.d/actions_adidentity.conf`
-|===
-
-После копирования перечитать определения:
+Файлы `cron.d/adidentity.conf` и `service/conf/actions.d/actions_adidentity.conf`
+разворачивает `plugin/install.sh` вместе с остальным кодом, он же перезапускает
+`configd`. Проверить, что задача на месте:
 
 [source,sh]
 ----
-service configd restart
 configctl adidentity expire
 ----
 

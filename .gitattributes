@@ -1,0 +1,12 @@
+* text=auto
+
+# These run on FreeBSD. A CRLF line ending breaks the shebang with a
+# "bad interpreter" error that names the right path, which is hard to read.
+*.sh text eol=lf
+*.py text eol=lf
+*.conf text eol=lf
+Makefile text eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
