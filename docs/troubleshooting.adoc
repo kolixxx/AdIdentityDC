@@ -211,7 +211,8 @@ Get-Content "$env:ProgramData\AdIdentity\login-memory.json"
 
 Два разных API:
 
-* Agent API (`http://<dc>:8443/api/v1/...`) — store в памяти агента на DC;
+* Agent API (`http://<dc>:8443/api/v1/...`) — store агента на DC,
+  файл `%ProgramData%\AdIdentity\sessions.json` (переживает рестарт службы, D8);
 * Plugin API (`http://<opnsense>/api/adidentity/...`) — store плагина на firewall.
 
 Если Agent уже `sessions: 0`, а Plugin ещё `count: 1` с тем же `expires_at`:
@@ -304,7 +305,7 @@ pfctl -t Managers -T show
 Если используются неперсистентные/external lists или state плагина сброшен:
 
 . Проверить, что Plugin делает resync on start.
-. Проверить `GET /sessions` у Agent.
+. Проверить `GET /api/v1/sessions` у Agent.
 . Проверить, что rebuild aliases завершился без ошибок.
 . Сверить count sessions Agent vs Plugin.
 

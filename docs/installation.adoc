@@ -20,7 +20,7 @@
 * права на установку Windows Service;
 * доступ к Security Event Log;
 * возможность LDAP/LDAPS чтения групп;
-* сетевой доступ до OPNsense (HTTPS push);
+* сетевой доступ до OPNsense (в лабе HTTP порт 80; TLS — требование D9);
 * открытый порт API агента для resync/health (если используется).
 
 === OPNsense
@@ -110,7 +110,8 @@ IMPORTANT: `--uninstall` не удаляет `/var/db/adidentity`, настро�
 * UI плагина открывается;
 * настройки сохраняются;
 * endpoint приёма сессий доступен;
-* (если aliases pre-create включены) group aliases созданы или создаются по событию.
+* при `auto_create_aliases` (по умолчанию включено) group aliases создаются
+  при первом событии для группы — заранее их создавать не требуется.
 
 == Установка Windows Agent
 
@@ -320,7 +321,7 @@ Get-Service AdIdentityAgent
 ----
 $token = "<shared-token>"
 
-# Agent API — store в памяти агента, выполнять на DC
+# Agent API — store агента (файл sessions.json), выполнять на DC
 Invoke-RestMethod -Uri "http://127.0.0.1:8443/api/v1/health" `
   -Headers @{ Authorization = "Bearer $token" }
 

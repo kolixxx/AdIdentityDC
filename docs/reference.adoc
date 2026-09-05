@@ -189,7 +189,13 @@ Base:: `/api/adidentity`
 |локальный список сессий Plugin (debug/UI)
 
 |`POST /api/adidentity/service/reconfigure`
-|применить настройки Plugin
+|применить настройки Plugin: перегенерировать шаблоны, зарегистрировать cron-задачу
+истечения сессий (D5) и сразу выполнить resync с агента. Остаётся успешным, даже
+если агент недоступен — тогда в ответе появляется `resync_warning`
+
+|`POST /api/adidentity/service/resync`
+|ручной полный resync Plugin <- Agent (кнопка «Resync from Agent» в UI).
+Только POST
 |===
 
 `remove` body:

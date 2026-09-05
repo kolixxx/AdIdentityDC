@@ -162,6 +162,16 @@ def test_a_non_latin_group_name_still_yields_a_usable_alias():
     assert alias and alias[0].isascii() and alias[0].isalpha()
 
 
+def test_two_non_latin_names_collide_on_one_alias():
+    # D28: nothing survives normalization of an all-Cyrillic name, so every
+    # such group or user collapses onto "unknown" and would share one pf table
+    # and one firewall rule. Pinned deliberately: this is the current, wrong
+    # behaviour, and the test must be flipped when D28 is fixed.
+    assert m.normalize_alias_name("Бухгалтерия") == "unknown"
+    assert m.normalize_alias_name("Кадры") == "unknown"
+    assert m.normalize_alias_name("Иванов", force_prefix="u_") == "u_unknown"
+
+
 def test_a_user_alias_gets_the_configured_prefix_once():
     assert m.normalize_alias_name("ivanov", force_prefix="u_") == "u_ivanov"
     assert m.normalize_alias_name("u_ivanov", force_prefix="u_") == "u_ivanov"
