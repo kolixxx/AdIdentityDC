@@ -294,6 +294,29 @@ Control (`VerifiedAndReputablePolicyState = 1`), и он периодическ�
 скрипт молча меняет то, что пропускает и блокирует firewall; это дело
 администратора, а не деинсталлятора.
 
+**Проверено на стенде** (клон в `/root/src/AdIdentityDC`), при живой сессии
+`petrov` 10.0.1.10 в `Developers`:
+
+- `--dry-run` — 18 файлов, пути верные, изменений нет
+- установка — 18 файлов, `configd` перезапущен
+- `reproject` — `count: 1`, `aliases_checked: ["Developers", "Managers"]`,
+  `ips_added: 0`, `ips_removed: 0`, `unreadable_tables: []`, `errors: []`
+- `configctl adidentity expire` и `session-list` ответили непустым JSON
+- после установки `pfctl -t Developers -T show` → 10.0.1.10, `Managers` пуст
+
+Ключевая строка здесь — нули в `ips_added`/`ips_removed`: только что
+установленный код прочитал реальное состояние pf и не тронул адрес
+работающего пользователя. На пустом store такая проверка ничего не значила бы.
+
+В `aliases_checked` попал и `Managers`, за которым нет ни одной сессии —
+подтверждение того, что список алиасов засевается из monitored groups, иначе
+остатки в опустевшем алиасе не вычищались бы.
+
+Побочно подтвердились D7 и D6: между проверками сработал периодический
+re-push (`ReconcileIntervalSec: 120`), он пережил окно рестарта `configd` и
+переотправил сессию как `event: "refresh"` с неизменными `ts` и `expires_at` —
+re-push намеренно не продлевает TTL.
+
 Заодно добавлен `.gitattributes` с `eol=lf` для `*.sh`, `*.py` и `*.conf`:
 при `core.autocrlf=true` на машине разработчика CRLF в шебанге даёт на FreeBSD
 ошибку «bad interpreter», в которой при этом указан правильный путь — на такой
@@ -750,7 +773,8 @@ default route, правила, NAT и настройки плагина, и хр
       · настоящий пакет требует дерева `opnsense/plugins`, отложен
       · `Makefile` помечен как нерабочий в этом дереве
       · раздел установки в `docs/installation.adoc` переписан по факту
-      · осталось проверить на стенде: `./plugin/install.sh` на OPNsense
+      · проверено на стенде при живой сессии: адрес работающего пользователя
+        не тронут (`ips_added: 0`, `ips_removed: 0`, `errors: []`)
 - [ ] **D13** — привести `docs/*.adoc` в соответствие с фактами
 
 ### Фаза 5 — за пределами пилота
@@ -802,7 +826,9 @@ default route, правила, NAT и настройки плагина, и хр
 - на DC лежит `%ProgramData%\AdIdentity\login-memory.json` с парой
   `ivanov / INTERNAL / 10.0.1.10` (артефакт D23, окно 24 ч);
 - флаги событий возвращены к рабочим: `Accept4768`, `Accept4624`,
-  `Accept4769` — все `true`, `LogonTypes4624 = [10]`.
+  `Accept4769` — все `true`, `LogonTypes4624 = [10]`;
+- клон репозитория на OPNsense: `/root/src/AdIdentityDC` — оттуда запускается
+  `./plugin/install.sh` при обновлении плагина.
 
 ---
 

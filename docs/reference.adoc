@@ -160,6 +160,12 @@ Auth:: `Authorization: Bearer <shared_token>` (один token на Agent <-> Plu
 |если нет — Plugin считает от TTL
 |===
 
+NOTE: Значение `refresh` приходит из двух разных источников, и по одному полю
+`event` их не различить. Активность по 4769 (D22) сдвигает и `ts`, и
+`expires_at`. Периодический re-push (`ReconcileIntervalSec`, D7) сохраняет оба
+значения без изменений и меняет только `event`. Поэтому в `session-list`
+признак свежей активности — сдвинувшийся `expires_at`, а не сам `refresh`.
+
 === Plugin API (принимает push)
 
 Base:: `/api/adidentity`
