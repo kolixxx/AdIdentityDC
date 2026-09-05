@@ -25,7 +25,8 @@ class ResyncService
             ];
         }
 
-        $fetch = $this->fetchAgentSessions($agentUrl, $token);
+        $insecure = (string)$model->general->agent_tls_insecure === '1';
+        $fetch = $this->fetchAgentSessions($agentUrl, $token, $insecure);
         if (($fetch['status'] ?? '') !== 'ok') {
             return $fetch;
         }
@@ -72,11 +73,19 @@ class ResyncService
             'url' => $agentUrl . '/api/v1/sessions',
             'fetched' => count($sessions),
         ];
+        // D9: make a weak channel visible in the UI response instead of only in docs.
+        if (stripos($agentUrl, 'https://') !== 0) {
+            $decoded['agent']['transport_warning'] =
+                'plain HTTP: the shared token is sent in clear text';
+        } elseif ($insecure) {
+            $decoded['agent']['transport_warning'] =
+                'certificate validation disabled for the agent';
+        }
         $decoded['aliases'] = $aliasStats;
         return $decoded;
     }
 
-    private function fetchAgentSessions(string $agentUrl, string $token): array
+    private function fetchAgentSessions(string $agentUrl, string $token, bool $insecure = false): array
     {
         $url = $agentUrl . '/api/v1/sessions';
         if (!function_exists('curl_init')) {
@@ -84,7 +93,7 @@ class ResyncService
         }
 
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CONNECTTIMEOUT => 5,
             CURLOPT_TIMEOUT => 20,
@@ -92,10 +101,18 @@ class ResyncService
                 'Accept: application/json',
                 'Authorization: Bearer ' . $token,
             ],
-            // Pilot: agent may use HTTP or self-signed HTTPS.
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
-        ]);
+        ];
+
+        // D9: verify the agent certificate by default. This request sends the shared
+        // token, so an unverified TLS session lets anyone who can answer on the
+        // address collect it. Skipping the check stays possible for a self-signed
+        // lab agent, but only when the operator asks for it explicitly.
+        if ($insecure) {
+            $opts[CURLOPT_SSL_VERIFYPEER] = false;
+            $opts[CURLOPT_SSL_VERIFYHOST] = false;
+        }
+
+        curl_setopt_array($ch, $opts);
         $body = curl_exec($ch);
         $errno = curl_errno($ch);
         $err = curl_error($ch);
@@ -103,7 +120,15 @@ class ResyncService
         curl_close($ch);
 
         if ($errno !== 0) {
-            return ['status' => 'failed', 'message' => 'agent fetch failed: ' . $err];
+            $result = ['status' => 'failed', 'message' => 'agent fetch failed: ' . $err];
+            // Without this hint a rejected certificate is indistinguishable from an
+            // agent that is simply down, and the operator goes looking at the service.
+            if (in_array($errno, [CURLE_SSL_PEER_CERTIFICATE, CURLE_SSL_CACERT, 60, 77], true)) {
+                $result['tls_hint'] = 'The agent certificate was rejected. Install a '
+                    . 'certificate the firewall trusts on the agent, or tick '
+                    . '"Skip agent certificate validation" to accept a self-signed one.';
+            }
+            return $result;
         }
         if ($code !== 200) {
             return ['status' => 'failed', 'message' => "agent HTTP {$code}", 'body' => $body];

@@ -294,20 +294,28 @@ Base:: `/api/v1` на хосте Agent
 
 * `user_alias_prefix` (default `u_`)
 * `auto_create_aliases` (default on)
+* `agent_tls_insecure` (default off) — не проверять сертификат агента при
+  resync; включать только для самоподписанного сертификата, см. D9
 
 === Минимальный конфиг Agent
 
-Имена — как в `appsettings.json` (секция `Agent`), совпадают со свойствами
-`AgentOptions`:
+Имена — как в `appsettings.json`, секция **`AdIdentity`**
+(`AgentOptions.SectionName`); совпадают со свойствами `AgentOptions`. Любой
+параметр можно задать переменной окружения, заменив уровни вложенности на
+`__`: например `AdIdentity__SharedToken`.
 
 * `PluginBaseUrl` (например `http://10.0.1.254` — базовый URL, путь
   `api/adidentity/session/upsert` агент добавляет сам)
 * `SharedToken`
+* `AllowInsecureTransport` (default `false`) — без него агент не стартует, если
+  `PluginBaseUrl` не `https://` и хост не loopback (D9)
 * `ListenAddr` (default `+`) / `ListenPort` (default `8443`)
-* LDAP: host, bind, base DN
-* `monitored_groups`
-* `session_ttl_sec`
-* event profile: `4768` + ограниченный `4624`
+* `ApiUseHttps` (default `false`) — требует сертификата, привязанного к порту
+  через `netsh http add sslcert`
+* LDAP: `Ldap.Host`, `Ldap.BindDn`, `Ldap.BindPassword`, `Ldap.BaseDn`
+* `MonitoredGroups`
+* `SessionTtlSec`
+* event profile: `Events.Accept4768` + ограниченный `Events.Accept4624`
 
 === Дефолты пилота
 

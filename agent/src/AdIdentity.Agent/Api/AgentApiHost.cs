@@ -28,7 +28,20 @@ public sealed class AgentApiHost : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var prefix = $"http://{_options.ListenAddr}:{_options.ListenPort}/";
+        // [D9] HttpListener cannot be handed a certificate: HTTPS works only if one
+        // is already bound to the port with `netsh http add sslcert`. So this only
+        // switches the prefix, and a missing binding surfaces as a start failure.
+        var scheme = _options.ApiUseHttps ? "https" : "http";
+        var prefix = $"{scheme}://{_options.ListenAddr}:{_options.ListenPort}/";
+        if (!_options.ApiUseHttps)
+        {
+            _logger.LogWarning(
+                "Agent API serves plain HTTP on port {Port}: resync requests carry the " +
+                "shared token in clear text. Set AdIdentity:ApiUseHttps once a certificate " +
+                "is bound to the port.",
+                _options.ListenPort);
+        }
+
         _listener = new HttpListener();
         _listener.Prefixes.Add(prefix);
         try

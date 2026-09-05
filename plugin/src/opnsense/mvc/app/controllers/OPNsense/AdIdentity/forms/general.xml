@@ -15,7 +15,13 @@
         <id>adidentity.general.agent_base_url</id>
         <label>Agent base URL</label>
         <type>text</type>
-        <help>Example: https://dc01.corp.local:8443</help>
+        <help>Example: https://dc01.corp.local:8443 — with plain http the shared token is sent in clear text.</help>
+    </field>
+    <field>
+        <id>adidentity.general.agent_tls_insecure</id>
+        <label>Skip agent certificate validation</label>
+        <type>checkbox</type>
+        <help>Leave off. Only for an agent with a self-signed certificate: resync sends the shared token, and an unverified connection lets anyone answering on that address collect it.</help>
     </field>
     <field>
         <id>adidentity.general.monitored_groups</id>

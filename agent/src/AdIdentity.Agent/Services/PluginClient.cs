@@ -21,9 +21,44 @@ public sealed class PluginClient : IPluginClient
         _http = http;
         _options = options.Value;
         _logger = logger;
-        _http.BaseAddress = new Uri(_options.PluginBaseUrl.TrimEnd('/') + "/");
+        var baseUri = new Uri(_options.PluginBaseUrl.TrimEnd('/') + "/");
+        GuardTransport(baseUri, _options.AllowInsecureTransport, _logger);
+        _http.BaseAddress = baseUri;
         _http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _options.SharedToken);
+    }
+
+    /// <summary>
+    /// [D9] Every request carries the shared token in a header, and that token is
+    /// enough to inject arbitrary sessions into the firewall. Sending it over plain
+    /// HTTP to a remote host is therefore a credential leak, not a mere warning, so
+    /// it takes a deliberate opt-in. Certificate validation itself is left to the
+    /// platform default: nothing here disables it.
+    /// </summary>
+    internal static void GuardTransport(Uri baseUri, bool allowInsecure, ILogger logger)
+    {
+        if (baseUri.Scheme == Uri.UriSchemeHttps)
+        {
+            return;
+        }
+
+        if (baseUri.IsLoopback)
+        {
+            return;
+        }
+
+        if (!allowInsecure)
+        {
+            throw new InvalidOperationException(
+                $"Refusing to push to {baseUri} over plain HTTP: the shared token would be " +
+                "sent in clear text to a remote host. Use an https:// PluginBaseUrl, or set " +
+                "AdIdentity:AllowInsecureTransport to true to accept this risk knowingly.");
+        }
+
+        logger.LogWarning(
+            "Pushing to {BaseUrl} over plain HTTP because AllowInsecureTransport is set. " +
+            "The shared token is readable by anyone on the network path.",
+            baseUri);
     }
 
     public Task UpsertAsync(Session session, CancellationToken cancellationToken) =>

@@ -147,6 +147,8 @@ public sealed class PluginPushRetryTests
         var options = new AgentOptions
         {
             PluginBaseUrl = "http://10.0.1.254",
+            // The lab firewall speaks plain http, which D9 otherwise refuses.
+            AllowInsecureTransport = true,
             SharedToken = "test-token",
             PushRetryCount = 3,
             // Keep the suite fast; the doubling itself is asserted separately.

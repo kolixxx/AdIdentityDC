@@ -15,6 +15,12 @@
             <agent_base_url type="TextField">
                 <Required>N</Required>
             </agent_base_url>
+            <!-- D9: resync sends the shared token, so the certificate is checked
+                 unless the operator explicitly accepts a self-signed agent. -->
+            <agent_tls_insecure type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </agent_tls_insecure>
             <monitored_groups type="TextField">
                 <Required>N</Required>
             </monitored_groups>

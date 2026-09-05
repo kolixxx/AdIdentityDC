@@ -6,11 +6,27 @@ public sealed class AgentOptions
 
     public string PluginBaseUrl { get; set; } = "https://opnsense.local";
     public string SharedToken { get; set; } = "";
+
+    /// <summary>
+    /// [D9] Permit pushing over plain HTTP to a remote host. The shared token
+    /// travels in an Authorization header, so without TLS anyone on the path can
+    /// read it and then forge sessions. Off by default: the agent refuses to start
+    /// rather than leak the token silently. Loopback needs no flag.
+    /// </summary>
+    public bool AllowInsecureTransport { get; set; } = false;
+
     /// <summary>
     /// HttpListener prefix host. Use "+" for all interfaces; "0.0.0.0" is not a valid prefix.
     /// </summary>
     public string ListenAddr { get; set; } = "+";
     public int ListenPort { get; set; } = 8443;
+
+    /// <summary>
+    /// [D9] Serve the Agent API over HTTPS. HttpListener takes the certificate from
+    /// the port binding, not from this process, so a certificate must already be
+    /// attached with `netsh http add sslcert` — see docs/configuration.adoc.
+    /// </summary>
+    public bool ApiUseHttps { get; set; } = false;
     public int SessionTtlSec { get; set; } = 28800;
 
     /// <summary>
