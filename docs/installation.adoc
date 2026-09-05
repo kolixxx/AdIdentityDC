@@ -355,6 +355,15 @@ upsert, expire, reproject), а в API это видно только как пу
 ----
 python3 -m py_compile /usr/local/opnsense/scripts/adidentity/session_store.py && echo OK
 ----
++
+Если рядом есть дерево репозитория, там же можно прогнать тесты логики
+сессий — они подменяют вызовы `configctl` и `pfctl`, поэтому ничего на
+firewall не меняют и не требуют pytest:
++
+[source,sh]
+----
+python3 plugin/tests/test_session_store.py
+----
 
 Ожидаемый ответ: `{"status": "ok", "action": "expire", "count": N, "expired": M, "projection": {...}}`.
 

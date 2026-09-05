@@ -117,23 +117,42 @@ public sealed class SecurityEventLogCollector : IEventCollector
         }
     }
 
-    internal bool TryParse(EventRecord record, out RawLogonEvent? parsed)
+    internal bool TryParse(EventRecord record, out RawLogonEvent? parsed) =>
+        TryParseValues(
+            (int)record.Id,
+            ReadEventData(record),
+            record.TimeCreated?.ToUniversalTime() ?? DateTimeOffset.UtcNow,
+            record.MachineName ?? Environment.MachineName,
+            out parsed);
+
+    /// <summary>
+    /// Decision logic separated from EventRecord, which cannot be constructed
+    /// outside the Eventing API, so the accept/reject rules stay testable.
+    /// </summary>
+    internal bool TryParseValues(
+        int eventId,
+        IReadOnlyDictionary<string, string> data,
+        DateTimeOffset ts,
+        string dc,
+        out RawLogonEvent? parsed)
     {
         parsed = null;
-        var eventId = (int)record.Id;
-        var data = ReadEventData(record);
 
         return eventId switch
         {
-            4768 when _options.Events.Accept4768 => TryParse4768(record, data, out parsed),
-            4769 when _options.Events.Accept4769 => TryParse4769(record, data, out parsed),
-            4624 when _options.Events.Accept4624 => TryParse4624(record, data, out parsed),
-            4776 when _options.Events.Accept4776 => TryParse4776(record, data, out parsed),
+            4768 when _options.Events.Accept4768 => TryParse4768(data, ts, dc, out parsed),
+            4769 when _options.Events.Accept4769 => TryParse4769(data, ts, dc, out parsed),
+            4624 when _options.Events.Accept4624 => TryParse4624(data, ts, dc, out parsed),
+            4776 when _options.Events.Accept4776 => TryParse4776(data, ts, dc, out parsed),
             _ => false
         };
     }
 
-    private bool TryParse4768(EventRecord record, IReadOnlyDictionary<string, string> data, out RawLogonEvent? parsed)
+    private bool TryParse4768(
+        IReadOnlyDictionary<string, string> data,
+        DateTimeOffset ts,
+        string dc,
+        out RawLogonEvent? parsed)
     {
         parsed = null;
 
@@ -160,13 +179,17 @@ public sealed class SecurityEventLogCollector : IEventCollector
             Ip = ip!,
             EventId = 4768,
             LogonType = null,
-            Ts = record.TimeCreated?.ToUniversalTime() ?? DateTimeOffset.UtcNow,
-            Dc = record.MachineName ?? Environment.MachineName
+            Ts = ts,
+            Dc = dc
         };
         return true;
     }
 
-    private bool TryParse4769(EventRecord record, IReadOnlyDictionary<string, string> data, out RawLogonEvent? parsed)
+    private bool TryParse4769(
+        IReadOnlyDictionary<string, string> data,
+        DateTimeOffset ts,
+        string dc,
+        out RawLogonEvent? parsed)
     {
         parsed = null;
 
@@ -193,13 +216,17 @@ public sealed class SecurityEventLogCollector : IEventCollector
             Ip = ip!,
             EventId = 4769,
             LogonType = null,
-            Ts = record.TimeCreated?.ToUniversalTime() ?? DateTimeOffset.UtcNow,
-            Dc = record.MachineName ?? Environment.MachineName
+            Ts = ts,
+            Dc = dc
         };
         return true;
     }
 
-    private bool TryParse4624(EventRecord record, IReadOnlyDictionary<string, string> data, out RawLogonEvent? parsed)
+    private bool TryParse4624(
+        IReadOnlyDictionary<string, string> data,
+        DateTimeOffset ts,
+        string dc,
+        out RawLogonEvent? parsed)
     {
         parsed = null;
 
@@ -231,13 +258,17 @@ public sealed class SecurityEventLogCollector : IEventCollector
             Ip = ip!,
             EventId = 4624,
             LogonType = logonType,
-            Ts = record.TimeCreated?.ToUniversalTime() ?? DateTimeOffset.UtcNow,
-            Dc = record.MachineName ?? Environment.MachineName
+            Ts = ts,
+            Dc = dc
         };
         return true;
     }
 
-    private bool TryParse4776(EventRecord record, IReadOnlyDictionary<string, string> data, out RawLogonEvent? parsed)
+    private bool TryParse4776(
+        IReadOnlyDictionary<string, string> data,
+        DateTimeOffset ts,
+        string dc,
+        out RawLogonEvent? parsed)
     {
         parsed = null;
 
@@ -259,8 +290,8 @@ public sealed class SecurityEventLogCollector : IEventCollector
             Ip = ip!,
             EventId = 4776,
             LogonType = null,
-            Ts = record.TimeCreated?.ToUniversalTime() ?? DateTimeOffset.UtcNow,
-            Dc = record.MachineName ?? Environment.MachineName
+            Ts = ts,
+            Dc = dc
         };
         return true;
     }
@@ -281,24 +312,34 @@ public sealed class SecurityEventLogCollector : IEventCollector
         return $"*[System[({idExpr})]]";
     }
 
+    /// <summary>
+    /// Read the named EventData values out of the rendered event XML.
+    /// </summary>
+    internal static Dictionary<string, string> ParseEventDataXml(string xml)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var doc = XDocument.Parse(xml);
+        XNamespace ns = "http://schemas.microsoft.com/win/2004/08/events/event";
+        foreach (var node in doc.Descendants(ns + "Data"))
+        {
+            var name = (string?)node.Attribute("Name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            map[name] = (node.Value ?? string.Empty).Trim();
+        }
+
+        return map;
+    }
+
     private static Dictionary<string, string> ReadEventData(EventRecord record)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            var xml = record.ToXml();
-            var doc = XDocument.Parse(xml);
-            XNamespace ns = "http://schemas.microsoft.com/win/2004/08/events/event";
-            foreach (var node in doc.Descendants(ns + "Data"))
-            {
-                var name = (string?)node.Attribute("Name");
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
-                map[name] = (node.Value ?? string.Empty).Trim();
-            }
+            map = ParseEventDataXml(record.ToXml());
         }
         catch
         {

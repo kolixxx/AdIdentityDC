@@ -72,6 +72,11 @@ public sealed class PluginClient : IPluginClient
 
         for (var attempt = 1; ; attempt++)
         {
+            // Raised for a status we must not retry. It is thrown below, outside
+            // the try, because the catch filter treats every HttpRequestException
+            // as transient and would otherwise swallow this one back into the loop.
+            HttpRequestException? fatal = null;
+
             try
             {
                 using var response = await _http.PostAsJsonAsync(path, payload, cancellationToken);
@@ -92,13 +97,17 @@ public sealed class PluginClient : IPluginClient
                 {
                     _logger.LogError(
                         "Plugin {Operation} failed: {Status} {Body}", operation, status, body);
-                    response.EnsureSuccessStatusCode();
-                    return;
+                    fatal = new HttpRequestException(
+                        $"Plugin {operation} failed with status {status}.",
+                        inner: null,
+                        response.StatusCode);
                 }
-
-                _logger.LogWarning(
-                    "Plugin {Operation} attempt {Attempt}/{Attempts} got {Status}; retrying in {Delay}",
-                    operation, attempt, attempts, status, delay);
+                else
+                {
+                    _logger.LogWarning(
+                        "Plugin {Operation} attempt {Attempt}/{Attempts} got {Status}; retrying in {Delay}",
+                        operation, attempt, attempts, status, delay);
+                }
             }
             catch (Exception ex) when (IsTransient(ex) && attempt < attempts)
             {
@@ -106,6 +115,11 @@ public sealed class PluginClient : IPluginClient
                     ex,
                     "Plugin {Operation} attempt {Attempt}/{Attempts} failed; retrying in {Delay}",
                     operation, attempt, attempts, delay);
+            }
+
+            if (fatal is not null)
+            {
+                throw fatal;
             }
 
             await Task.Delay(delay, cancellationToken);

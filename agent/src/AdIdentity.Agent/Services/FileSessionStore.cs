@@ -23,14 +23,28 @@ public sealed class FileSessionStore : ISessionStore
     private readonly ILogger<FileSessionStore> _logger;
 
     public FileSessionStore(ILogger<FileSessionStore> logger)
+        : this(logger, DefaultPath())
+    {
+    }
+
+    /// <summary>
+    /// Internal so dependency injection cannot pick it and tests can redirect
+    /// the snapshot away from ProgramData.
+    /// </summary>
+    internal FileSessionStore(ILogger<FileSessionStore> logger, string path)
     {
         _logger = logger;
+        _path = path;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        LoadUnlocked();
+    }
+
+    private static string DefaultPath()
+    {
         var dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "AdIdentity");
-        Directory.CreateDirectory(dir);
-        _path = Path.Combine(dir, "sessions.json");
-        LoadUnlocked();
+        return Path.Combine(dir, "sessions.json");
     }
 
     public int Count
