@@ -217,6 +217,54 @@ def save_sessions(sessions: list[dict[str, Any]]) -> None:
     os.replace(tmp_path, SESSIONS_FILE)
 
 
+# ---------------------------------------------------------------------------
+# [D29 managed-aliases]
+# Ledger of aliases this plugin has actually put addresses into.
+#
+# Without it, cleanup only ever looks at aliases that are wanted right now plus
+# the aliases of monitored groups. A per-user alias (enable_user_aliases) is in
+# neither set once the session is gone, so its address stayed in the pf table
+# forever - a rule with Source = u_<name> kept passing traffic after logoff.
+#
+# Guessing by the user_alias_prefix is not an option: an unrelated alias the
+# admin happens to name "u_something" would then be flushed by us.
+# See PROJECT_STATE.md D29.
+# ---------------------------------------------------------------------------
+
+def managed_file() -> Path:
+    # Derived at call time so tests (and a relocated DB_DIR) stay honest.
+    return DB_DIR / "managed_aliases.json"
+
+
+def load_managed_aliases() -> set[str]:
+    try:
+        data = json.loads(managed_file().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    names = data.get("aliases", [])
+    if not isinstance(names, list):
+        return set()
+    return {str(n) for n in names if str(n).strip()}
+
+
+def save_managed_aliases(aliases: set[str]) -> None:
+    ensure_dirs()
+    payload = {"aliases": sorted(aliases), "updated_at": utc_now().isoformat()}
+    raw = json.dumps(payload, indent=2) + "\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=str(DB_DIR), delete=False) as tmp:
+        tmp.write(raw)
+        tmp_path = tmp.name
+    os.replace(tmp_path, managed_file())
+
+
+def update_managed_aliases(holding: set[str], released: set[str]) -> None:
+    """Record aliases that now hold addresses, forget the ones left empty."""
+    current = load_managed_aliases()
+    updated = (current | holding) - (released - holding)
+    if updated != current:
+        save_managed_aliases(updated)
+
+
 def session_key(user: str, domain: str) -> str:
     return f"{domain}\\{user}".lower()
 
@@ -370,6 +418,8 @@ def apply_alias_projection(
     all_aliases = set(before) | set(after)
     added = removed = 0
     errors: list[str] = collect_ascii_name_errors(new_sessions, conf)
+    # [D29 managed-aliases] aliases whose cleanup did not go through
+    stuck: set[str] = set()
 
     for alias in sorted(all_aliases):
         old_ips = before.get(alias, set())
@@ -395,6 +445,15 @@ def apply_alias_projection(
                 removed += 1
             else:
                 errors.append(f"delete {alias} {ip}: {msg or 'failed'}")
+                stuck.add(alias)
+
+    # [D29 managed-aliases] remember who holds addresses, so a per-user alias
+    # can still be found for cleanup after its session is gone.
+    holding = {a for a in all_aliases if after.get(a)} | stuck
+    update_managed_aliases(
+        holding=holding,
+        released=all_aliases - holding,
+    )
 
     return {
         "aliases_touched": sorted(all_aliases),
@@ -422,14 +481,21 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
         ok, _ = alias_name_allowed(g, conf)
         if ok:
             empty_aliases.add(normalize_alias_name(g))
-    aliases = set(desired) | empty_aliases
+    # [D29 managed-aliases] aliases we filled earlier may hold addresses that
+    # nothing wants now - per-user aliases in particular, and any alias left
+    # over after a setting was turned off.
+    managed = load_managed_aliases()
+    aliases = set(desired) | empty_aliases | managed
 
     added = removed = 0
     errors: list[str] = collect_ascii_name_errors(sessions, conf)
     unreadable: list[str] = []
+    holding: set[str] = set()
+    released: set[str] = set()
 
     for alias in sorted(aliases):
         want = desired.get(alias, set())
+        (holding if want else released).add(alias)
         readable, have = pf_table_ips(alias)
         if not readable and want:
             # The alias may have been created just now (D10); give pf a moment.
@@ -458,6 +524,13 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
                 removed += 1
             else:
                 errors.append(f"delete {alias} {ip}: {msg or 'failed'}")
+                # Keep it on the ledger, otherwise the next pass stops looking.
+                holding.add(alias)
+                released.discard(alias)
+
+    # [D29 managed-aliases] An alias nothing wants is dropped from the ledger
+    # only after this pass emptied it (or its table is gone for good).
+    update_managed_aliases(holding=holding, released=released)
 
     return {
         "aliases_checked": sorted(aliases),

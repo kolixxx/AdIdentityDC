@@ -678,6 +678,110 @@ def test_the_expire_pass_repairs_pf_even_when_nothing_expired():
         env.cleanup()
 
 
+USER_ALIAS_CONF = {
+    "monitored_groups": "Managers",
+    "enable_user_aliases": "1",
+    "user_alias_prefix": "u_",
+}
+
+
+def test_a_per_user_alias_is_emptied_after_the_session_expires():
+    # D29: the per-user alias belongs to no monitored group, so once the
+    # session is gone nothing pointed cleanup at it and the address stayed -
+    # a rule with Source = u_ivanov kept passing traffic after logoff.
+    env = Env(pf={"Managers": set(), "u_ivanov": set()})
+    try:
+        m.reconcile_pf_tables(
+            [session("ivanov", "10.0.1.10", ["Managers"])], USER_ALIAS_CONF
+        )
+        assert env.pf["u_ivanov"] == {"10.0.1.10"}
+
+        m.reconcile_pf_tables([], USER_ALIAS_CONF)
+        assert env.pf["u_ivanov"] == set() and env.pf["Managers"] == set()
+    finally:
+        env.cleanup()
+
+
+def test_turning_user_aliases_off_clears_what_they_left_behind():
+    env = Env(pf={"Managers": set(), "u_ivanov": set()})
+    try:
+        rows = [session("ivanov", "10.0.1.10", ["Managers"])]
+        m.reconcile_pf_tables(rows, USER_ALIAS_CONF)
+        assert env.pf["u_ivanov"] == {"10.0.1.10"}
+
+        m.reconcile_pf_tables(rows, {"monitored_groups": "Managers"})
+        assert env.pf["u_ivanov"] == set()
+        assert env.pf["Managers"] == {"10.0.1.10"}
+    finally:
+        env.cleanup()
+
+
+def test_an_alias_the_plugin_never_filled_is_left_alone():
+    # The ledger exists precisely so cleanup does not guess by prefix: an
+    # alias the admin happens to name u_something is not ours to flush.
+    env = Env(pf={"Managers": set(), "u_vpn_peers": {"10.9.9.9"}})
+    try:
+        m.reconcile_pf_tables(
+            [session("ivanov", "10.0.1.10", ["Managers"])], USER_ALIAS_CONF
+        )
+        assert env.pf["u_vpn_peers"] == {"10.9.9.9"}
+    finally:
+        env.cleanup()
+
+
+def test_an_emptied_alias_drops_off_the_ledger():
+    env = Env(pf={"Managers": set(), "u_ivanov": set()})
+    try:
+        m.reconcile_pf_tables(
+            [session("ivanov", "10.0.1.10", ["Managers"])], USER_ALIAS_CONF
+        )
+        assert "u_ivanov" in m.load_managed_aliases()
+
+        m.reconcile_pf_tables([], USER_ALIAS_CONF)
+        assert "u_ivanov" not in m.load_managed_aliases()
+    finally:
+        env.cleanup()
+
+
+def test_an_alias_that_would_not_empty_stays_on_the_ledger():
+    # A failed delete must not make the plugin forget the alias, or the next
+    # pass would stop looking at it and the address would be stranded.
+    env = Env(pf={"Managers": set(), "u_ivanov": set()})
+    try:
+        m.reconcile_pf_tables(
+            [session("ivanov", "10.0.1.10", ["Managers"])], USER_ALIAS_CONF
+        )
+        original = m.configctl_filter
+        m.configctl_filter = lambda op, alias, ip: (
+            (False, "busy") if op == "delete" else original(op, alias, ip)
+        )
+        try:
+            m.reconcile_pf_tables([], USER_ALIAS_CONF)
+        finally:
+            m.configctl_filter = original
+        assert "u_ivanov" in m.load_managed_aliases()
+
+        m.reconcile_pf_tables([], USER_ALIAS_CONF)
+        assert env.pf["u_ivanov"] == set()
+    finally:
+        env.cleanup()
+
+
+def test_the_expire_pass_cleans_a_per_user_alias():
+    env = Env(
+        conf="monitored_groups=Managers\nenable_user_aliases=1\nuser_alias_prefix=u_\n",
+        sessions=[session("ivanov", "10.0.1.10", ["Managers"], ttl_sec=-1)],
+        pf={"Managers": {"10.0.1.10"}, "u_ivanov": {"10.0.1.10"}},
+    )
+    try:
+        m.save_managed_aliases({"Managers", "u_ivanov"})
+        result = m.expire_cmd()
+        assert result["expired"] == 1
+        assert env.pf["u_ivanov"] == set() and env.pf["Managers"] == set()
+    finally:
+        env.cleanup()
+
+
 def test_a_reboot_is_recovered_from_the_persisted_sessions():
     # pf tables are runtime-only, so every alias comes up empty while
     # sessions.json still looks healthy.
