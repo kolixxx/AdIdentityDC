@@ -1,0 +1,274 @@
+= Quick start: установка за один проход
+:toc: left
+:toclevels: 2
+
+Короткая инструкция для пилота: **один DC + один OPNsense**. Порядок шагов
+обязателен — сначала приёмник (плагин), потом отправитель (агент).
+
+Подробности и разбор причин — в `installation.adoc`, `configuration.adoc`,
+`troubleshooting.adoc`. Здесь только то, что нужно сделать.
+
+== Прежде чем начать
+
+[cols="1,3"]
+|===
+|Что |Зачем
+
+|Придумать общий токен
+|Одна длинная случайная строка, одна и та же на обеих сторонах. Это не
+пароль на чтение: владелец токена может выдать любому адресу любые права.
+
+|Проверить имена в AD
+|Группы и учётные записи, которые станут алиасами, должны быть записаны
+**английскими буквами** (`Managers`, `ivanov`). Кириллица отклоняется с
+ошибкой — это осознанная политика, см. `configuration.adoc`.
+
+|Свести часы
+|UTC на DC и на OPNsense должен совпадать с точностью до секунд. Агент
+пишет срок жизни сессии по своим часам, плагин истекает по своим.
+|===
+
+== Шаг 1. Плагин на OPNsense
+
+По SSH под `root`:
+
+[source,sh]
+----
+pkg install -y git
+git clone https://github.com/kolixxx/AdIdentityDC.git /root/AdIdentityDC
+cd /root/AdIdentityDC && ./plugin/install.sh
+----
+
+Обновление на новую версию — оттуда же:
+
+[source,sh]
+----
+cd /root/AdIdentityDC && git pull && ./plugin/install.sh
+----
+
+Затем в веб-интерфейсе: **Firewall → AdIdentity → Settings**
+
+. `Enable` — включить;
+. `Shared token` — вставить придуманный токен;
+. `Agent base URL` — адрес агента, например `http://10.0.1.99:8443`;
+. `Monitored groups` — по одной группе AD на строку (для начала одна);
+. `Enable user aliases` — оставить выключенным;
+. `Require ASCII names for aliases` — оставить включённым;
+. `Session TTL` — `28800` (8 часов);
+. **Apply**.
+
+IMPORTANT: `Apply` обязателен даже если ничего не меняли после установки: он
+перегенерирует конфиг для скриптов и регистрирует задачу истечения сессий.
+Без неё просроченный адрес останется в правилах.
+
+== Шаг 2. Сборка агента (на машине с .NET SDK, не на DC)
+
+[source,powershell]
+----
+dotnet publish agent\src\AdIdentity.Agent.Service\AdIdentity.Agent.Service.csproj `
+  -c Release -r win-x64 --self-contained true -o publish\agent
+----
+
+Собирается self-contained — .NET на контроллере домена ставить не нужно.
+Копировать на DC нужно **результат сборки**, а не исходники репозитория.
+
+== Шаг 3. Подготовка DC
+
+Свести часы (лаба — UTC+3):
+
+[source,powershell]
+----
+tzutil /s "Russian Standard Time"
+w32tm /resync /force
+[DateTimeOffset]::UtcNow      # сверить с `date -u` на OPNsense
+----
+
+Включить аудит выдачи service ticket — без него активность пользователя не
+продлевает сессию:
+
+[source,powershell]
+----
+auditpol /set /subcategory:"Kerberos Service Ticket Operations" /success:enable
+----
+
+Открыть порт API агента только для firewall:
+
+[source,powershell]
+----
+New-NetFirewallRule -DisplayName "AdIdentity Agent API" -Direction Inbound `
+  -Protocol TCP -LocalPort 8443 -RemoteAddress 10.0.1.254 -Action Allow
+----
+
+== Шаг 4. Конфигурация агента
+
+Скопировать `publish\agent` в `C:\AdIdentity`, затем привести
+`appsettings.json` к такому виду (значения — лабораторные):
+
+[source,json]
+----
+{
+  "Logging": { "LogLevel": { "Default": "Information" } },
+  "AdIdentity": {
+    "PluginBaseUrl": "http://10.0.1.254",
+    "SharedToken": "ВСТАВИТЬ_ТОТ_ЖЕ_ТОКЕН",
+    "AllowInsecureTransport": true,
+    "ListenAddr": "+",
+    "ListenPort": 8443,
+    "ApiUseHttps": false,
+    "SessionTtlSec": 28800,
+    "MonitoredGroups": [ "Managers" ],
+    "Ldap": {
+      "Host": "dc01.internal.lab",
+      "Port": 389,
+      "UseSsl": false,
+      "BindDn": "",
+      "BindPassword": "",
+      "BaseDn": "DC=internal,DC=lab",
+      "UseNestedGroups": true
+    },
+    "Events": {
+      "Accept4768": true,
+      "Accept4769": true,
+      "Accept4624": true,
+      "LogonTypes4624": [ 10 ]
+    }
+  }
+}
+----
+
+Обязательные к вниманию поля:
+
+[cols="1,3"]
+|===
+|Поле |Правило
+
+|`PluginBaseUrl`
+|Только базовый адрес. Путь `api/adidentity/session/upsert` агент добавит сам.
+
+|`AllowInsecureTransport`
+|Нужен `true`, если адрес плагина начинается с `http://`. Иначе агент
+**намеренно не запустится**, чтобы не отправить токен открытым текстом.
+С `https://` флаг не нужен.
+
+|`ListenAddr`
+|`+` — иначе resync со стороны плагина не дойдёт. `0.0.0.0` недопустим.
+
+|`BaseDn`
+|Пустое значение не роняет агент: сессия дойдёт, но групп будет ноль и alias
+останется пустым.
+
+|`SharedToken`
+|Можно не хранить в файле, а задать переменной окружения
+`AdIdentity__SharedToken` — файл перетирается при пересборке.
+|===
+
+== Шаг 5. Первый запуск в консоли
+
+[source,powershell]
+----
+cd C:\AdIdentity
+.\AdIdentity.Agent.Service.exe
+----
+
+В логе должно быть:
+
+* `Agent API listening on http://+:8443/`
+* `LDAP connected to <fqdn>:389 ssl=False`
+* после входа пользователя — `Session upserted INTERNAL\ivanov 10.0.1.10 groups=1`
+
+`groups=0` означает, что не сходятся `BaseDn`, `MonitoredGroups` или
+пользователь не в группе.
+
+== Шаг 6. Регистрация службы
+
+Остановить консольный запуск (иначе порт занят), затем:
+
+[source,powershell]
+----
+New-Service -Name "AdIdentityAgent" `
+  -BinaryPathName "C:\AdIdentity\AdIdentity.Agent.Service.exe" `
+  -DisplayName "AdIdentity Agent" -StartupType Automatic
+Start-Service AdIdentityAgent
+----
+
+NOTE: `sc.exe create` спотыкается на кавычках в пути с пробелами и печатает
+справку вместо создания службы. Используйте `New-Service`.
+
+== Шаг 7. Проверка
+
+Пять проверок, по порядку. Если ломается любая — дальше не идти.
+
+. Агент жив (на DC):
++
+[source,powershell]
+----
+Invoke-RestMethod -Uri "http://127.0.0.1:8443/api/v1/health" `
+  -Headers @{ Authorization = "Bearer <токен>" }
+----
++
+Ожидается `status: ok`.
+
+. Вход пользователя из отслеживаемой группы на доменный ПК.
+
+. Сессия у плагина (на OPNsense):
++
+[source,sh]
+----
+configctl adidentity session-list
+----
++
+В ответе должны быть `user`, `ip`, `groups` и `expires_at`.
+
+. Адрес в таблице firewall:
++
+[source,sh]
+----
+pfctl -t Managers -T show
+----
++
+NOTE: У alias типа External поле `Content` в редакторе всегда пустое —
+адреса живут в runtime-таблице pf. Смотреть `pfctl`, а не `Content`.
+
+. Правило firewall. **Плагин правил не создаёт** — это работа
+  администратора: Firewall → Rules, `Source = Managers`. Пока правила нет,
+  проверять нечего.
+
+== Что чаще всего делают не так
+
+[cols="1,3"]
+|===
+|Симптом |Причина
+
+|Служба агента не стартует, в логе `Refusing to push`
+|`http://` в `PluginBaseUrl` без `AllowInsecureTransport: true`.
+
+|`groups=0` в логе, alias пустой
+|Неверный `BaseDn`, либо группа не указана в `MonitoredGroups`, либо
+пользователь в неё не входит.
+
+|Сессия есть, адрес в pf есть, но трафик не фильтруется
+|Не создано правило firewall по алиасу.
+
+|Пользователь вышел, а доступ остался
+|Ожидаемо: старение по TTL. Также сверьте UTC на обеих сторонах.
+
+|Просроченный адрес не уходит из таблицы
+|Не нажимали `Apply` после установки — не зарегистрирована задача истечения.
+Проверить: `grep adidentity /var/cron/tabs/nobody`.
+
+|401 при запросе к плагину
+|Токен не совпадает, либо переопределён переменной окружения
+`AdIdentity__SharedToken`. Учтите: `service/resync` принимает только
+авторизацию веб-интерфейса или API-ключ OPNsense, а не общий токен.
+
+|Ошибка `must use English (ASCII) characters`
+|Имя группы или учётной записи не латиницей. Переименовать в AD.
+|===
+
+== Что этот продукт не делает
+
+* не создаёт правила firewall — только алиасы;
+* не отбирает права у адреса, если за ним появилось устройство без входа в
+  домен, до истечения TTL (осознанное ограничение, см. `overview.adoc`);
+* не поддерживает несколько контроллеров домена без отдельной прослойки
+  (`multi-dc.adoc`).
