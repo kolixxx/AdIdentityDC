@@ -497,16 +497,27 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
         want = desired.get(alias, set())
         (holding if want else released).add(alias)
         readable, have = pf_table_ips(alias)
-        if not readable and want:
-            # The alias may have been created just now (D10); give pf a moment.
+        # Worth a short wait only if something is expected in this table, or if
+        # we filled it before: the alias may have been created moments ago
+        # (D10) or the filter may be mid-reload. A group alias from the config
+        # that never held anything is not worth blocking on.
+        if not readable and (want or alias in managed):
             if wait_for_table(alias):
                 readable, have = pf_table_ips(alias)
         if not readable:
-            # Unknown current content: only add, never delete on a guess.
-            if want:
-                unreadable.append(alias)
-            else:
+            if not want:
+                if alias in managed:
+                    # [D29 managed-aliases] An unreadable table is not a
+                    # confirmed empty one. Keep it on the ledger, or its
+                    # addresses are stranded with nobody left to look.
+                    unreadable.append(alias)
+                    holding.add(alias)
+                    released.discard(alias)
+                else:
+                    released.discard(alias)
                 continue
+            # Unknown current content: only add, never delete on a guess.
+            unreadable.append(alias)
 
         for ip in sorted(want - have):
             ok, msg = configctl_filter("add", alias, ip)

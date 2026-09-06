@@ -767,6 +767,37 @@ def test_an_alias_that_would_not_empty_stays_on_the_ledger():
         env.cleanup()
 
 
+def test_a_table_we_could_not_read_is_not_written_off_as_empty():
+    # Found in the lab: Apply reloads the filter, so a table can be briefly
+    # unreadable. Treating that as "already empty" dropped the alias off the
+    # ledger and stranded its address with nobody left to look for it.
+    env = Env(pf={"Managers": set(), "u_ivanov": None}, table_ready=False)
+    try:
+        m.save_managed_aliases({"Managers", "u_ivanov"})
+        result = m.reconcile_pf_tables([], {"monitored_groups": "Managers"})
+        assert "u_ivanov" in result["unreadable_tables"]
+        assert "u_ivanov" in m.load_managed_aliases()
+
+        # Once pf answers again, the leftover address is cleaned up.
+        env.pf["u_ivanov"] = {"10.0.1.10"}
+        m.reconcile_pf_tables([], {"monitored_groups": "Managers"})
+        assert env.pf["u_ivanov"] == set()
+        assert "u_ivanov" not in m.load_managed_aliases()
+    finally:
+        env.cleanup()
+
+
+def test_a_configured_group_without_a_table_does_not_join_the_ledger():
+    # An alias the plugin never filled must not accumulate on the ledger just
+    # because pfctl cannot see it (auto-create off, or alias deleted by hand).
+    env = Env(pf={}, table_ready=False)
+    try:
+        m.reconcile_pf_tables([], {"monitored_groups": "Managers"})
+        assert m.load_managed_aliases() == set()
+    finally:
+        env.cleanup()
+
+
 def test_the_expire_pass_cleans_a_per_user_alias():
     env = Env(
         conf="monitored_groups=Managers\nenable_user_aliases=1\nuser_alias_prefix=u_\n",
