@@ -88,6 +88,7 @@ class SessionController extends ApiControllerBase
         }
 
         $names = [];
+        $errors = [];
         $allow = $this->monitoredGroups();
         $groups = $payload['groups'] ?? [];
         if (is_array($groups)) {
@@ -97,6 +98,12 @@ class SessionController extends ApiControllerBase
                     continue;
                 }
                 if ($allow && !in_array($g, $allow, true)) {
+                    continue;
+                }
+                // [D28 ascii-names]
+                $refusal = AliasHelper::asciiAliasRefusal($g);
+                if ($refusal !== null) {
+                    $errors[] = $refusal;
                     continue;
                 }
                 $names[] = AliasHelper::normalizeName($g);
@@ -110,11 +117,21 @@ class SessionController extends ApiControllerBase
             }
             $user = trim((string)($payload['user'] ?? ''));
             if ($user !== '') {
-                $names[] = AliasHelper::normalizeName($user, $prefix);
+                // [D28 ascii-names]
+                $refusal = AliasHelper::asciiAliasRefusal($user);
+                if ($refusal !== null) {
+                    $errors[] = $refusal;
+                } else {
+                    $names[] = AliasHelper::normalizeName($user, $prefix);
+                }
             }
         }
 
-        return AliasHelper::ensureExternalAliases($names);
+        $result = AliasHelper::ensureExternalAliases($names);
+        if ($errors !== []) {
+            $result['errors'] = array_values(array_unique(array_merge($result['errors'], $errors)));
+        }
+        return $result;
     }
 
     private function runStore(string $action, array $payload): array

@@ -28,6 +28,39 @@ class AliasHelper
     }
 
     /**
+     * [D28 ascii-names] Whether AD names must be ASCII before becoming aliases.
+     * Default ON. Uncheck require_ascii_alias_names in the UI to disable.
+     * grep "D28 ascii-names" for PHP + Python; see PROJECT_STATE.md § D28.
+     */
+    public static function asciiAliasNamesRequired(): bool
+    {
+        $model = new AdIdentity();
+        $raw = (string)($model->general->require_ascii_alias_names ?? '1');
+        return $raw === '1';
+    }
+
+    /**
+     * [D28 ascii-names]
+     * @return string|null null = allowed; otherwise human-readable refusal
+     */
+    public static function asciiAliasRefusal(string $name, ?bool $required = null): ?string
+    {
+        $required ??= self::asciiAliasNamesRequired();
+        $name = trim($name);
+        if ($name === '') {
+            return 'empty alias source name';
+        }
+        if (!$required) {
+            return null;
+        }
+        if (preg_match('/^[\x20-\x7E]+$/', $name) !== 1) {
+            return "alias source '{$name}' must use English (ASCII) characters; "
+                . 'rename the AD group or user account. [D28 ascii-names]';
+        }
+        return null;
+    }
+
+    /**
      * Create missing aliases as type=external (runtime content via pf tables).
      *
      * @param string[] $names

@@ -48,6 +48,12 @@
         <help>Create missing group/user aliases automatically.</help>
     </field>
     <field>
+        <id>adidentity.general.require_ascii_alias_names</id>
+        <label>Require ASCII names for aliases</label>
+        <type>checkbox</type>
+        <help>IMPORTANT: AD group and user names that become firewall aliases must use English (ASCII) characters only — Latin letters, digits, spaces, - _ . Cyrillic or other scripts are refused with an error (they would otherwise collapse to one shared alias "unknown"). Rename the group/user in Active Directory. Leave this checked unless you are replacing the policy (see D28 in PROJECT_STATE).</help>
+    </field>
+    <field>
         <id>adidentity.general.session_ttl_sec</id>
         <label>Session TTL (seconds)</label>
         <type>text</type>

@@ -36,6 +36,11 @@
                 <Default>1</Default>
                 <Required>Y</Required>
             </auto_create_aliases>
+            <!-- [D28 ascii-names] Refuse non-ASCII AD names as aliases (default ON). -->
+            <require_ascii_alias_names type="BooleanField">
+                <Default>1</Default>
+                <Required>Y</Required>
+            </require_ascii_alias_names>
             <session_ttl_sec type="IntegerField">
                 <Default>28800</Default>
                 <MinimumValue>60</MinimumValue>

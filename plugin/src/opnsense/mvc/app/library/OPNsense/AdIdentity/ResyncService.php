@@ -53,8 +53,14 @@ class ResyncService
 
         $aliasStats = ['created' => [], 'existing' => [], 'errors' => []];
         if ((string)$model->general->auto_create_aliases === '1') {
-            $names = $this->collectAliasNames($model, $sessions);
-            $aliasStats = AliasHelper::ensureExternalAliases($names);
+            $collected = $this->collectAliasNames($model, $sessions);
+            $aliasStats = AliasHelper::ensureExternalAliases($collected['names']);
+            if ($collected['errors'] !== []) {
+                $aliasStats['errors'] = array_values(array_unique(array_merge(
+                    $aliasStats['errors'],
+                    $collected['errors']
+                )));
+            }
         }
 
         $backend = new Backend();
@@ -172,6 +178,7 @@ class ResyncService
         }
 
         $names = [];
+        $errors = [];
         $enableUser = (string)$model->general->enable_user_aliases === '1';
         $prefix = (string)$model->general->user_alias_prefix;
         if ($prefix === '') {
@@ -192,17 +199,31 @@ class ResyncService
                     if ($allow && !in_array($g, $allow, true)) {
                         continue;
                     }
+                    // [D28 ascii-names]
+                    $refusal = AliasHelper::asciiAliasRefusal($g);
+                    if ($refusal !== null) {
+                        $errors[] = $refusal;
+                        continue;
+                    }
                     $names[] = AliasHelper::normalizeName($g);
                 }
             }
             if ($enableUser) {
                 $user = trim((string)($s['user'] ?? ''));
                 if ($user !== '') {
-                    $names[] = AliasHelper::normalizeName($user, $prefix);
+                    $refusal = AliasHelper::asciiAliasRefusal($user);
+                    if ($refusal !== null) {
+                        $errors[] = $refusal;
+                    } else {
+                        $names[] = AliasHelper::normalizeName($user, $prefix);
+                    }
                 }
             }
         }
 
-        return array_values(array_unique($names));
+        return [
+            'names' => array_values(array_unique($names)),
+            'errors' => array_values(array_unique($errors)),
+        ];
     }
 }

@@ -53,6 +53,7 @@
             <li>{{ lang._('Agent pushes login sessions; Plugin updates External aliases.') }}</li>
             <li>{{ lang._('Admin writes Firewall Rules using those aliases.') }}</li>
             <li>{{ lang._('Apply also attempts Plugin <- Agent resync. Use Resync manually anytime.') }}</li>
+            <li><strong>{{ lang._('AD group/user names for aliases must be ASCII (English characters). Cyrillic names are refused — rename them in Active Directory. See “Require ASCII names for aliases”.') }}</strong></li>
         </ul>
     </div>
 </div>

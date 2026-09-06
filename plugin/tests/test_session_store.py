@@ -157,19 +157,38 @@ def test_an_alias_never_starts_with_a_digit():
     assert m.normalize_alias_name("2nd Line Support").startswith("g_")
 
 
-def test_a_non_latin_group_name_still_yields_a_usable_alias():
-    alias = m.normalize_alias_name("Бухгалтерия")
-    assert alias and alias[0].isascii() and alias[0].isalpha()
+def test_a_non_latin_group_name_is_refused_for_aliases():
+    # [D28 ascii-names] default policy: do not map Cyrillic to "unknown".
+    ok, msg = m.alias_name_allowed("Бухгалтерия", {})
+    assert ok is False
+    assert msg and "ASCII" in msg and "D28" in msg
 
 
-def test_two_non_latin_names_collide_on_one_alias():
-    # D28: nothing survives normalization of an all-Cyrillic name, so every
-    # such group or user collapses onto "unknown" and would share one pf table
-    # and one firewall rule. Pinned deliberately: this is the current, wrong
-    # behaviour, and the test must be flipped when D28 is fixed.
+def test_two_non_latin_names_do_not_share_an_alias():
+    # With the policy on, neither name becomes an alias key — no collision.
+    conf = {"require_ascii_alias_names": "1", "monitored_groups": "Бухгалтерия,Кадры"}
+    rows = [
+        session("ivanov", "10.0.1.10", ["Бухгалтерия"]),
+        session("petrov", "10.0.1.11", ["Кадры"]),
+    ]
+    assert m.desired_alias_ips(rows, conf) == {}
+    errors = m.collect_ascii_name_errors(rows, conf)
+    assert len(errors) == 2
+    assert all("ASCII" in e for e in errors)
+
+
+def test_ascii_policy_can_be_switched_off():
+    # Escape hatch: old collapse-to-unknown behaviour returns if someone
+    # unchecks the UI box (or prepares a different D28 scheme).
+    conf = {"require_ascii_alias_names": "0"}
+    assert m.alias_name_allowed("Бухгалтерия", conf) == (True, None)
     assert m.normalize_alias_name("Бухгалтерия") == "unknown"
     assert m.normalize_alias_name("Кадры") == "unknown"
-    assert m.normalize_alias_name("Иванов", force_prefix="u_") == "u_unknown"
+
+
+def test_latin_group_names_still_normalize():
+    assert m.alias_name_allowed("Managers", {}) == (True, None)
+    assert m.normalize_alias_name("Domain Admins") == "Domain_Admins"
 
 
 def test_a_user_alias_gets_the_configured_prefix_once():

@@ -87,6 +87,86 @@ def normalize_alias_name(name: str, force_prefix: str | None = None) -> str:
     return cleaned[:64]
 
 
+# ---------------------------------------------------------------------------
+# [D28 ascii-names]
+# Policy for v1: names that become firewall aliases must be ASCII (English
+# letters/digits and ordinary punctuation). A Cyrillic (or other non-ASCII)
+# group/user name is refused with a clear error instead of collapsing to the
+# shared alias "unknown" (which would merge unrelated groups into one rule).
+#
+# Default is ON (require_ascii_alias_names=1 in adidentity.conf / UI).
+#
+# How to turn the policy off (accept risk of "unknown" collisions again):
+#   Firewall → AdIdentity → uncheck "Require ASCII names for aliases".
+#
+# How to replace this with transliteration/hash later without a scavenger hunt:
+#   grep -R "D28 ascii-names"  →  swap alias_name_allowed() / PHP twin;
+#   keep the flag so the new scheme can still be disabled.
+# See PROJECT_STATE.md § D28.
+# ---------------------------------------------------------------------------
+
+def require_ascii_alias_names(conf: dict[str, str]) -> bool:
+    # Default ON when the key is missing: a fresh install must not silently
+    # merge Cyrillic groups into "unknown".
+    return conf.get("require_ascii_alias_names", "1") in ("1", "true", "True", "yes", "on")
+
+
+def alias_name_allowed(name: str, conf: dict[str, str]) -> tuple[bool, str | None]:
+    """Return (ok, error_message). error_message is set only when refused."""
+    raw = name.strip()
+    if not raw:
+        return False, "empty alias source name"
+    if not require_ascii_alias_names(conf):
+        return True, None
+    try:
+        raw.encode("ascii")
+    except UnicodeEncodeError:
+        return False, (
+            f"alias source {raw!r} must use English (ASCII) characters; "
+            f"rename the AD group or user account. [D28 ascii-names]"
+        )
+    return True, None
+
+
+def collect_ascii_name_errors(
+    sessions: list[dict[str, Any]],
+    conf: dict[str, str],
+) -> list[str]:
+    """Deduped refusal messages for non-ASCII group/user names in scope."""
+    if not require_ascii_alias_names(conf):
+        return []
+    groups_allow = monitored_groups(conf)
+    enable_user = conf.get("enable_user_aliases", "0") in ("1", "true", "True", "yes")
+    seen: set[str] = set()
+    errors: list[str] = []
+
+    def note(label: str) -> None:
+        ok, msg = alias_name_allowed(label, conf)
+        if ok or label in seen:
+            return
+        seen.add(label)
+        if msg:
+            errors.append(msg)
+
+    for g in groups_allow:
+        note(g)
+    for s in sessions:
+        for g in s.get("groups", []) or []:
+            gname = str(g).strip()
+            if not gname:
+                continue
+            if groups_allow and gname not in groups_allow:
+                continue
+            note(gname)
+        if enable_user:
+            user = str(s.get("user", "")).strip()
+            if user:
+                note(user)
+    return errors
+
+# [D28 ascii-names] end of policy helpers
+
+
 def ensure_dirs() -> None:
     DB_DIR.mkdir(parents=True, exist_ok=True)
     if not SESSIONS_FILE.exists():
@@ -265,10 +345,17 @@ def desired_alias_ips(sessions: list[dict[str, Any]], conf: dict[str, str]) -> d
                 continue
             if groups_allow and gname not in groups_allow:
                 continue
+            # [D28 ascii-names] skip non-ASCII sources instead of mapping to "unknown"
+            ok, _ = alias_name_allowed(gname, conf)
+            if not ok:
+                continue
             mapping.setdefault(normalize_alias_name(gname), set()).add(ip)
         if enable_user:
             user = str(s.get("user", "")).strip()
             if user:
+                ok, _ = alias_name_allowed(user, conf)
+                if not ok:
+                    continue
                 mapping.setdefault(normalize_alias_name(user, force_prefix=prefix), set()).add(ip)
     return mapping
 
@@ -282,7 +369,7 @@ def apply_alias_projection(
     after = desired_alias_ips(new_sessions, conf)
     all_aliases = set(before) | set(after)
     added = removed = 0
-    errors: list[str] = []
+    errors: list[str] = collect_ascii_name_errors(new_sessions, conf)
 
     for alias in sorted(all_aliases):
         old_ips = before.get(alias, set())
@@ -329,10 +416,16 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
     desired = desired_alias_ips(sessions, conf)
     # Include configured group aliases with no sessions left, so leftover
     # addresses in an alias that should now be empty are still cleaned up.
-    aliases = set(desired) | {normalize_alias_name(g) for g in monitored_groups(conf)}
+    # [D28 ascii-names] skip non-ASCII monitored names (would be "unknown").
+    empty_aliases = set()
+    for g in monitored_groups(conf):
+        ok, _ = alias_name_allowed(g, conf)
+        if ok:
+            empty_aliases.add(normalize_alias_name(g))
+    aliases = set(desired) | empty_aliases
 
     added = removed = 0
-    errors: list[str] = []
+    errors: list[str] = collect_ascii_name_errors(sessions, conf)
     unreadable: list[str] = []
 
     for alias in sorted(aliases):
