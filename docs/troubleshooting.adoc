@@ -353,12 +353,19 @@ pfctl -t Managers -T show
 содержимое — это runtime-таблицы `pf`, они поднимаются **пустыми**. Поэтому
 восстановление содержимого — отдельный механизм (D2), и он двойной:
 
-* configd-действие `[start]` вызывает `session_store.py --reproject`: читает
-  `/var/db/adidentity/sessions.json`, отбрасывает просроченное, заливает
-  актуальные адреса в таблицы;
+* при загрузке OPNsense выполняет
+  `/usr/local/etc/rc.syshook.d/start/99-adidentity`, а тот — `configctl
+  adidentity reproject`: читает `/var/db/adidentity/sessions.json`,
+  отбрасывает просроченное, заливает актуальные адреса в таблицы;
 * cron каждые 2 минуты сверяет таблицы с сохранёнными сессиями (D21) — то
-  есть даже если `[start]` не отработал, таблицы восстановятся в пределах
-  двух минут.
+  есть даже если хук не отработал, таблицы восстановятся в пределах двух
+  минут.
+
+WARNING: В сборках до исправления D31 хука не было, и работала только сверка
+из cron: сразу после загрузки таблицы были пусты и наполнялись лишь через
+пару минут. Если после ребута видите именно это — проверьте, что файл
+`/usr/local/etc/rc.syshook.d/start/99-adidentity` существует и исполняемый;
+если нет, переустановите плагин через `plugin/install.sh`.
 
 Что проверить, если таблицы всё же пустые:
 
@@ -368,6 +375,8 @@ configctl adidentity session-list          # сессии на месте?
 configctl adidentity reproject             # восстановить вручную
 pfctl -t Managers -T show
 grep adidentity /var/cron/tabs/nobody      # задача сверки зарегистрирована?
+ls -l /usr/local/etc/rc.syshook.d/start/99-adidentity   # хук на месте?
+grep 'adidentity boot reproject' /var/log/system/latest.log
 ----
 
 Если `session-list` пустой, а у агента сессии есть — восстановить снимок

@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# [D31 boot-restore] Refill alias tables after a reboot.
+#
+# pf table contents are runtime-only: after a reboot every alias comes up empty
+# while sessions.json still looks healthy, and rules by group silently stop
+# matching (D2). The reproject action exists for exactly this, but nothing used
+# to call it at boot - `[start]` in actions.d only runs on `configctl adidentity
+# start`, which no boot step performs. This hook is that missing caller.
+#
+# The periodic reconcile from cron would also repair the tables, but only within
+# its interval. A firewall must not spend minutes after every boot passing or
+# dropping traffic by an empty alias.
+
+SCRIPT=/usr/local/opnsense/scripts/adidentity/session_store.py
+[ -x "$SCRIPT" ] || exit 0
+
+# The reproject adds addresses through `configctl filter add table`, so configd
+# has to be up. At boot this hook can win the race against it.
+i=0
+while [ $i -lt 30 ]; do
+    [ -S /var/run/configd.socket ] && break
+    sleep 1
+    i=$((i + 1))
+done
+
+if [ ! -S /var/run/configd.socket ]; then
+    logger -t adidentity "boot reproject skipped: configd socket not ready"
+    exit 0
+fi
+
+out=$(/usr/local/sbin/configctl adidentity reproject 2>&1)
+logger -t adidentity "boot reproject: $out"
+
+exit 0

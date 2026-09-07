@@ -24,6 +24,11 @@ SRC_ROOT=$(cd "$(dirname "$0")/src/opnsense" 2>/dev/null && pwd || true)
 DEST_ROOT=/usr/local/opnsense
 SCRIPT_DIR="$DEST_ROOT/scripts/adidentity"
 
+# [D31 boot-restore] Lives outside /usr/local/opnsense, so it is copied on its
+# own rather than by the tree walk below.
+SYSHOOK_SRC=$(dirname "$0")/src/etc/rc.syshook.d/start/99-adidentity
+SYSHOOK_DEST=/usr/local/etc/rc.syshook.d/start/99-adidentity
+
 DRY_RUN=0
 DO_RELOAD=1
 
@@ -136,6 +141,19 @@ install_files() {
         count=$((count + 1))
         [ "$DRY_RUN" -eq 1 ] || log "  $DEST_ROOT/$src"
     done
+
+    # [D31 boot-restore] Executable, and in rc.syshook.d rather than the plugin
+    # tree: OPNsense runs those at boot, and nothing else calls reproject then.
+    if [ -f "$SYSHOOK_SRC" ]; then
+        run install -d -o root -g wheel -m 755 "$(dirname "$SYSHOOK_DEST")"
+        run install -o root -g wheel -m 755 "$SYSHOOK_SRC" "$SYSHOOK_DEST"
+        count=$((count + 1))
+        [ "$DRY_RUN" -eq 1 ] || log "  $SYSHOOK_DEST"
+    else
+        warn "boot hook missing at $SYSHOOK_SRC: after a reboot the alias tables"
+        warn "would stay empty until the periodic reconcile runs"
+    fi
+
     log "installed $count file(s)"
 }
 
@@ -148,6 +166,11 @@ uninstall_files() {
             count=$((count + 1))
         fi
     done
+
+    if [ -f "$SYSHOOK_DEST" ]; then
+        run rm -f "$SYSHOOK_DEST"
+        count=$((count + 1))
+    fi
 
     for dir in \
         "$DEST_ROOT/scripts/adidentity" \
@@ -218,6 +241,13 @@ verify() {
             log "  configctl $cmd -> $(printf '%s' "$out" | cut -c1-80)"
         fi
     done
+
+    if [ -x "$SYSHOOK_DEST" ]; then
+        log "  boot hook  -> $SYSHOOK_DEST"
+    else
+        warn "boot hook not installed or not executable: $SYSHOOK_DEST"
+        warn "alias tables would come up empty after a reboot"
+    fi
 }
 
 # --- main ------------------------------------------------------------------

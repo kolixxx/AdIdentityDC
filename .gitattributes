@@ -7,6 +7,9 @@
 *.conf text eol=lf
 Makefile text eol=lf
 
+# Boot hook, no extension, so the rules above miss it.
+plugin/src/etc/rc.syshook.d/start/* text eol=lf
+
 *.png binary
 *.jpg binary
 *.zip binary
