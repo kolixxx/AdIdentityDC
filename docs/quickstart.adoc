@@ -278,10 +278,13 @@ NOTE: У alias типа External поле `Content` в редакторе все
 [source,sh]
 ----
 pfctl -t Managers -T show
-grep 'adidentity boot reproject' /var/log/system/latest.log
+grep -i adidentity /var/log/configd/latest.log | tail    # <1>
 ----
+<1> Восстановление идёт через configd, поэтому след остаётся в его логе, а не
+в `/var/log/system/`. Сразу после загрузки там должен быть `adidentity
+reproject`, дальше — `adidentity expire` каждые 2 минуты.
 
-Если таблица пуста, а строки в логе нет — хук не установлен (так было в
+Если таблица пуста, а `reproject` в логе нет — хук не установлен (так было в
 сборках до исправления D31): переустановите плагин через `plugin/install.sh`.
 
 **Перезагрузка или пропажа питания на DC.** Пока DC недоступен, новые входы не

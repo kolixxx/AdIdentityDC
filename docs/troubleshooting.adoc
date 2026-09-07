@@ -376,8 +376,14 @@ configctl adidentity reproject             # восстановить вручн
 pfctl -t Managers -T show
 grep adidentity /var/cron/tabs/nobody      # задача сверки зарегистрирована?
 ls -l /usr/local/etc/rc.syshook.d/start/99-adidentity   # хук на месте?
-grep 'adidentity boot reproject' /var/log/system/latest.log
+grep -i adidentity /var/log/configd/latest.log | tail
 ----
+
+Лог смотреть именно configd: и хук, и cron дёргают плагин через `configctl`,
+поэтому вызовы видны в `/var/log/configd/latest.log`. В `/var/log/system/`
+их нет — там окажется только строка `adidentity boot reproject` от самого
+хука, и то в зависимости от маршрутизации syslog, так что искать надо по
+configd-логу.
 
 Если `session-list` пустой, а у агента сессии есть — восстановить снимок
 кнопкой `Resync from Agent` в UI. Пустой ответ backend без текста ошибки
