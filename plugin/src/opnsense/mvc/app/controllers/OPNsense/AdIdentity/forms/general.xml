@@ -54,9 +54,15 @@
         <help>IMPORTANT: AD group and user names that become firewall aliases must use English (ASCII) characters only — Latin letters, digits, spaces, - _ . Cyrillic or other scripts are refused with an error (they would otherwise collapse to one shared alias "unknown"). Rename the group/user in Active Directory. Leave this checked unless you are replacing the policy (see D28 in PROJECT_STATE).</help>
     </field>
     <field>
+        <id>adidentity.general.kill_states_on_release</id>
+        <label>Kill connections when access is revoked</label>
+        <type>checkbox</type>
+        <help>Removing an address from an alias only affects new connections: pf matches rules on the first packet, so an already open session (RDP, a tunnel, a download) keeps working. Enable this to drop the firewall states of an address once no alias holds it any more. Note that this kills every connection of that address, including ones permitted by unrelated rules.</help>
+    </field>
+    <field>
         <id>adidentity.general.session_ttl_sec</id>
         <label>Session TTL (seconds)</label>
         <type>text</type>
-        <help>Default 28800 (8 hours).</help>
+        <help>Default 28800 (8 hours). Values below 10 hours can leave a user without access before Kerberos renews their ticket — see docs/configuration.adoc.</help>
     </field>
 </form>

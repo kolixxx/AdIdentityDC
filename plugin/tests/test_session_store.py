@@ -39,7 +39,7 @@ m = load_module()
 # Module globals a test may redirect; restored after every test.
 PATCHED = (
     "DB_DIR", "SESSIONS_FILE", "LOCK_FILE", "CONF_FILE",
-    "configctl_filter", "pf_table_ips", "wait_for_table",
+    "configctl_filter", "pf_table_ips", "wait_for_table", "pf_kill_states",
 )
 
 
@@ -69,9 +69,11 @@ class Env:
 
         self.pf = {} if pf is None else dict(pf)
         self.calls: list[tuple[str, str, str]] = []
+        self.killed: list[str] = []
         m.configctl_filter = self._filter
         m.pf_table_ips = self._show
         m.wait_for_table = lambda alias, timeout_sec=0: table_ready
+        m.pf_kill_states = self._kill
 
         if sessions is not None:
             m.save_sessions(sessions)
@@ -91,6 +93,10 @@ class Env:
     def _show(self, alias):
         held = self.pf.get(alias)
         return (False, set()) if held is None else (True, set(held))
+
+    def _kill(self, ip):
+        self.killed.append(ip)
+        return True, ""
 
     def stored(self):
         return json.loads(m.SESSIONS_FILE.read_text(encoding="utf-8"))["sessions"]
@@ -674,6 +680,82 @@ def test_the_expire_pass_repairs_pf_even_when_nothing_expired():
         result = m.expire_cmd()
         assert result["expired"] == 0
         assert env.pf["Managers"] == {"10.0.1.10"}
+    finally:
+        env.cleanup()
+
+
+KILL_CONF = {"monitored_groups": "Managers", "kill_states_on_release": "1"}
+
+
+def test_open_connections_survive_revocation_unless_asked_otherwise():
+    # Default behaviour: pf keeps existing states, so an open session outlives
+    # the address leaving the alias. Documented, not silently changed.
+    env = Env(pf={"Managers": {"10.0.1.10"}})
+    try:
+        result = m.reconcile_pf_tables([], {"monitored_groups": "Managers"})
+        assert result["ips_removed"] == 1
+        assert result["states_killed"] == 0 and env.killed == []
+    finally:
+        env.cleanup()
+
+
+def test_revoking_access_can_drop_open_connections():
+    env = Env(pf={"Managers": {"10.0.1.10"}})
+    try:
+        result = m.reconcile_pf_tables([], KILL_CONF)
+        assert result["states_killed"] == 1 and env.killed == ["10.0.1.10"]
+    finally:
+        env.cleanup()
+
+
+def test_a_group_change_does_not_cut_the_users_connections():
+    # The holder did not change, only their groups did. Tearing down their
+    # connections here would be a bug, not a security measure.
+    env = Env(
+        conf="monitored_groups=Managers,Developers\nkill_states_on_release=1\n",
+        sessions=[session("ivanov", "10.0.1.10", ["Managers"])],
+        pf={"Managers": {"10.0.1.10"}, "Developers": set()},
+    )
+    try:
+        result = m.upsert_session(session("ivanov", "10.0.1.10", ["Developers"]))
+        assert env.pf["Developers"] == {"10.0.1.10"}
+        assert env.pf["Managers"] == set()
+        assert result["projection"]["states_killed"] == 0 and env.killed == []
+    finally:
+        env.cleanup()
+
+
+def test_a_takeover_cuts_the_previous_holders_connections():
+    # D1 eviction plus D30. Both users are in the same group, so no pf table
+    # changes at all - but the address changed hands, and connections opened by
+    # the previous holder would otherwise keep flowing for the new one.
+    env = Env(
+        conf="monitored_groups=Managers\nkill_states_on_release=1\n",
+        sessions=[session("ivanov", "10.0.1.10", ["Managers"])],
+        pf={"Managers": {"10.0.1.10"}},
+    )
+    try:
+        result = m.upsert_session(session("petrov", "10.0.1.10", ["Managers"]))
+        assert env.pf["Managers"] == {"10.0.1.10"}
+        assert result["projection"]["ips_removed"] == 0
+        assert result["projection"]["states_killed"] == 1
+        assert env.killed == ["10.0.1.10"]
+    finally:
+        env.cleanup()
+
+
+def test_an_expiring_session_cuts_its_connections():
+    env = Env(
+        conf="monitored_groups=Managers\nkill_states_on_release=1\n",
+        sessions=[session("ivanov", "10.0.1.10", ["Managers"], ttl_sec=-1)],
+        pf={"Managers": {"10.0.1.10"}},
+    )
+    try:
+        result = m.expire_cmd()
+        assert result["expired"] == 1
+        assert env.pf["Managers"] == set()
+        assert result["projection"]["states_killed"] == 1
+        assert env.killed == ["10.0.1.10"]
     finally:
         env.cleanup()
 

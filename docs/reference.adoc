@@ -300,6 +300,9 @@ Base:: `/api/v1` на хосте Agent
   be ASCII; non-ASCII refused with an error instead of collapsing to `unknown`
 * `agent_tls_insecure` (default off) — не проверять сертификат агента при
   resync; включать только для самоподписанного сертификата, см. D9
+* `kill_states_on_release` (default off) — [D30] снимать pf states адреса,
+  когда у него сменился или исчез владелец; иначе уже открытые соединения
+  переживают отзыв прав. Смена групп у того же пользователя states не рвёт
 
 === Минимальный конфиг Agent
 

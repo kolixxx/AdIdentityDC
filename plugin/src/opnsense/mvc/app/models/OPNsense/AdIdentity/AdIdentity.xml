@@ -41,6 +41,12 @@
                 <Default>1</Default>
                 <Required>Y</Required>
             </require_ascii_alias_names>
+            <!-- [D30 kill-states] Drop pf states when an address loses its last
+                 alias, so revocation also hits already open connections. -->
+            <kill_states_on_release type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </kill_states_on_release>
             <session_ttl_sec type="IntegerField">
                 <Default>28800</Default>
                 <MinimumValue>60</MinimumValue>

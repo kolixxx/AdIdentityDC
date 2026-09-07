@@ -328,6 +328,94 @@ def configctl_filter(op: str, alias: str, ip: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+# ---------------------------------------------------------------------------
+# [D30 kill-states]
+# Dropping an address from an alias only affects *new* connections: pf matches
+# rules on the first packet, after that the state lives on its own. An open
+# TCP session (RDP, a tunnel, a download) therefore survives the revocation.
+#
+# Killing states makes revocation immediate, but it kills every state of that
+# address, including ones permitted by unrelated rules. That is what you want
+# when the address moved to another device (D26), and heavy-handed when a
+# working user's session merely timed out - hence a setting, default OFF.
+#
+# How to remove: grep -R "D30 kill-states" and drop the flag plus the calls.
+# See PROJECT_STATE.md D30.
+# ---------------------------------------------------------------------------
+
+def kill_states_enabled(conf: dict[str, str]) -> bool:
+    return conf.get("kill_states_on_release", "0") in ("1", "true", "True", "yes")
+
+
+def pf_kill_states(ip: str) -> tuple[bool, str]:
+    """Drop pf states for one address, in both directions."""
+    any_net = "::/0" if ":" in ip else "0.0.0.0/0"
+    # -k <host> covers states where the address is the source; the second form
+    # covers those where it is the destination.
+    commands = [
+        ["/sbin/pfctl", "-k", ip],
+        ["/sbin/pfctl", "-k", any_net, "-k", ip],
+    ]
+    messages: list[str] = []
+    ok_any = False
+    for cmd in commands:
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
+        except Exception as exc:  # noqa: BLE001
+            messages.append(str(exc))
+            continue
+        if proc.returncode == 0:
+            ok_any = True
+        else:
+            messages.append((proc.stderr or proc.stdout or "").strip())
+    return ok_any, "; ".join(m for m in messages if m)
+
+
+def session_owner_map(sessions: list[dict[str, Any]]) -> dict[str, str]:
+    """Which user holds each address (one holder per address in v1)."""
+    owners: dict[str, str] = {}
+    for s in sessions:
+        ip = str(s.get("ip", "")).strip()
+        if ip:
+            owners[ip] = session_key(str(s.get("user", "")), str(s.get("domain", "")))
+    return owners
+
+
+def release_addresses(
+    old_sessions: list[dict[str, Any]],
+    new_sessions: list[dict[str, Any]],
+    removed_ips: set[str],
+    conf: dict[str, str],
+) -> tuple[int, list[str]]:
+    """Kill states for addresses whose holder left or changed.
+
+    The decision is about *who* holds the address, not about which tables
+    changed. A user whose group membership changed keeps the address and their
+    connections. A user who left, or an address taken over by someone else,
+    does not: connections opened under the previous holder's rules would
+    otherwise keep flowing for the new one - the very thing this setting is
+    meant to prevent.
+    """
+    if not kill_states_enabled(conf):
+        return 0, []
+
+    before = session_owner_map(old_sessions)
+    after = session_owner_map(new_sessions)
+    cut = {ip for ip, holder in before.items() if after.get(ip) != holder}
+    # Addresses pf held while no session claims them (expiry via cron).
+    cut |= {ip for ip in removed_ips if ip not in after}
+
+    killed = 0
+    errors: list[str] = []
+    for ip in sorted(cut):
+        ok, msg = pf_kill_states(ip)
+        if ok:
+            killed += 1
+        else:
+            errors.append(f"kill states {ip}: {msg or 'failed'}")
+    return killed, errors
+
+
 def pf_table_ips(alias: str) -> tuple[bool, set[str]]:
     """Read what pf actually holds for an alias.
 
@@ -420,6 +508,8 @@ def apply_alias_projection(
     errors: list[str] = collect_ascii_name_errors(new_sessions, conf)
     # [D29 managed-aliases] aliases whose cleanup did not go through
     stuck: set[str] = set()
+    # [D30 kill-states] addresses actually taken out of a table
+    released_ips: set[str] = set()
 
     for alias in sorted(all_aliases):
         old_ips = before.get(alias, set())
@@ -443,6 +533,7 @@ def apply_alias_projection(
             ok, msg = configctl_filter("delete", alias, ip)
             if ok:
                 removed += 1
+                released_ips.add(ip)
             else:
                 errors.append(f"delete {alias} {ip}: {msg or 'failed'}")
                 stuck.add(alias)
@@ -455,10 +546,15 @@ def apply_alias_projection(
         released=all_aliases - holding,
     )
 
+    # [D30 kill-states] make the revocation apply to open connections too
+    killed, kill_errors = release_addresses(old_sessions, new_sessions, released_ips, conf)
+    errors.extend(kill_errors)
+
     return {
         "aliases_touched": sorted(all_aliases),
         "ips_added": added,
         "ips_removed": removed,
+        "states_killed": killed,
         "errors": errors,
     }
 
@@ -492,6 +588,8 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
     unreadable: list[str] = []
     holding: set[str] = set()
     released: set[str] = set()
+    # [D30 kill-states] addresses actually taken out of a table
+    released_ips: set[str] = set()
 
     for alias in sorted(aliases):
         want = desired.get(alias, set())
@@ -533,6 +631,7 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
             ok, msg = configctl_filter("delete", alias, ip)
             if ok:
                 removed += 1
+                released_ips.add(ip)
             else:
                 errors.append(f"delete {alias} {ip}: {msg or 'failed'}")
                 # Keep it on the ledger, otherwise the next pass stops looking.
@@ -543,10 +642,16 @@ def reconcile_pf_tables(sessions: list[dict[str, Any]], conf: dict[str, str]) ->
     # only after this pass emptied it (or its table is gone for good).
     update_managed_aliases(holding=holding, released=released)
 
+    # [D30 kill-states] Only the "nobody claims this address" case is visible
+    # here: reconcile compares against pf, not against a previous session list.
+    killed, kill_errors = release_addresses([], sessions, released_ips, conf)
+    errors.extend(kill_errors)
+
     return {
         "aliases_checked": sorted(aliases),
         "ips_added": added,
         "ips_removed": removed,
+        "states_killed": killed,
         "unreadable_tables": unreadable,
         "errors": errors,
     }
