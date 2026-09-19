@@ -11,6 +11,7 @@ AD login event -> Agent (user+ip+groups) -> Plugin -> Aliases -> Firewall Rules 
 ```
 docs/quickstart.adoc  install in one pass (start here)
 docs/test-plan.adoc   full lab run: AD accounts to failure scenarios
+CHEATSHEET.md         day-to-day commands for both sides, one page
 docs/                 AsciiDoc (filled with settled facts over time)
 plugin/               OPNsense plugin (OPNsense\AdIdentity)
 agent/                Windows Agent (.NET 8 Worker / Windows Service)
