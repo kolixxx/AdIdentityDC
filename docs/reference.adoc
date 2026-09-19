@@ -407,6 +407,7 @@ Base:: `/api/v1` на хосте Agent
 * link:overview.adoc[Overview]
 * link:architecture.adoc[Architecture]
 * link:configuration.adoc[Configuration]
+* link:test-plan.adoc[Test plan: полный прогон стенда]
 * link:installation.adoc[Installation]
 * link:perfomance.adoc[Performance]
 * link:troubleshooting.adoc[Troubleshooting]

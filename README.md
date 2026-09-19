@@ -10,6 +10,7 @@ AD login event -> Agent (user+ip+groups) -> Plugin -> Aliases -> Firewall Rules 
 
 ```
 docs/quickstart.adoc  install in one pass (start here)
+docs/test-plan.adoc   full lab run: AD accounts to failure scenarios
 docs/                 AsciiDoc (filled with settled facts over time)
 plugin/               OPNsense plugin (OPNsense\AdIdentity)
 agent/                Windows Agent (.NET 8 Worker / Windows Service)
@@ -29,6 +30,10 @@ cd /root/AdIdentityDC && ./plugin/install.sh
 
 The agent is deployed as the **published build** (`dotnet publish ... --self-contained`)
 copied to the DC and registered as a Windows Service; see the quick start.
+
+To verify a deployment end to end — AD groups and accounts, both installs, every
+acceptance criterion and each failure scenario — follow
+**[docs/test-plan.adoc](docs/test-plan.adoc)**.
 
 ## Pilot contract
 

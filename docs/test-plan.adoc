@@ -1,0 +1,899 @@
+= Боевой тест: полный прогон с нуля
+:toc: left
+:toclevels: 3
+:sectnums:
+
+Один документ, по которому можно развернуть стенд с пустого места и проверить
+**весь** функционал: от создания учёток в AD до отзыва прав и поведения после
+перезагрузки. Порядок шагов обязателен — каждый следующий опирается на
+результат предыдущего.
+
+Установка здесь описана кратко и в варианте «под тест». Полные объяснения —
+в `quickstart.adoc` (быстрая установка), `installation.adoc` (подробно),
+`configuration.adoc` (смысл параметров), `troubleshooting.adoc` (разбор
+отказов).
+
+== Как читать этот документ
+
+Каждая команда помечена машиной, на которой её выполняют:
+
+[cols="1,3"]
+|===
+|Метка |Где выполнять
+
+|`[DC]`
+|Контроллер домена, PowerShell от администратора
+
+|`[FW]`
+|OPNsense, SSH под `root` (или Interfaces → Shell в GUI)
+
+|`[PC]`
+|Доменная рабочая станция, под тестовым пользователем
+
+|`[UI]`
+|Веб-интерфейс OPNsense
+|===
+
+Тест засчитан, только если наблюдаемый результат совпал с колонкой «Ожидание».
+Если тест провалился — чинить его слой и повторять, а не идти дальше: каждый
+следующий тест предполагает, что предыдущие проходят.
+
+== Карта стенда
+
+Значения лабораторные, подставьте свои.
+
+[cols="1,2,2"]
+|===
+|Что |Значение |Примечание
+
+|Домен
+|`internal.lab`, NetBIOS `INTERNAL`
+|Base DN `DC=internal,DC=lab`
+
+|DC
+|`10.0.1.99`, `dc01.internal.lab`
+|Агент ставится сюда
+
+|OPNsense
+|`10.0.1.254`
+|GUI и API по HTTP, порт 80
+
+|Рабочая станция
+|`10.0.1.10`
+|В домене, DNS на DC
+
+|Порт API агента
+|`8443`
+|Нужен только для resync со стороны плагина
+
+|Общий токен
+|одна длинная случайная строка
+|Одинаковая на обеих сторонах, в репозиторий не попадает
+
+|Таймзона
+|UTC+3 на всех машинах
+|Важен совпадающий UTC, а не одинаковая зона
+|===
+
+== Часть 1. Подготовка DC
+
+=== 1.1 Часы
+
+`[DC]`
+
+[source,powershell]
+----
+tzutil /s "Russian Standard Time"
+w32tm /resync /force
+[DateTimeOffset]::UtcNow
+----
+
+`[FW]`
+
+[source,sh]
+----
+date -u
+----
+
+IMPORTANT: UTC должен совпадать с точностью до секунд. Агент проставляет срок
+жизни сессии по своим часам, плагин истекает по своим — расхождение либо
+оставляет доступ навсегда, либо снимает его мгновенно.
+
+=== 1.2 Аудит событий
+
+Нужны три подкатегории: Kerberos TGT (4768), Kerberos service ticket (4769,
+для продления сессии) и Logon (4624, для RDP).
+
+`[DC]`
+
+[source,powershell]
+----
+auditpol /set /subcategory:"{0CCE9242-69AE-11D9-BED3-505054503030}" /success:enable  # Kerberos Authentication Service
+auditpol /set /subcategory:"{0CCE9240-69AE-11D9-BED3-505054503030}" /success:enable  # Kerberos Service Ticket Operations
+auditpol /set /subcategory:"{0CCE9215-69AE-11D9-BED3-505054503030}" /success:enable  # Logon
+auditpol /get /category:* | Select-String -Pattern "Kerberos|Logon"
+----
+
+NOTE: GUID вместо названия — намеренно: имена подкатегорий локализованы, и на
+русской Windows `/subcategory:"Logon"` вернёт ошибку.
+
+Проверить, что события реально пишутся (после входа пользователя):
+
+[source,powershell]
+----
+Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4768} -MaxEvents 3 |
+  Format-List TimeCreated, Message
+----
+
+=== 1.3 Группы и учётные записи
+
+Для полного прогона нужны **две группы и два пользователя**, разведённые без
+пересечений — иначе тест на вытеснение адреса (T5) ничего не докажет.
+
+`[DC]`
+
+[source,powershell]
+----
+New-ADGroup -Name "Managers"   -GroupScope Global -GroupCategory Security
+New-ADGroup -Name "Developers" -GroupScope Global -GroupCategory Security
+
+$pw = Read-Host -AsSecureString "Пароль для тестовых учёток"
+
+New-ADUser -Name "ivanov" -SamAccountName "ivanov" `
+  -UserPrincipalName "ivanov@internal.lab" `
+  -AccountPassword $pw -Enabled $true -PasswordNeverExpires $true
+
+New-ADUser -Name "petrov" -SamAccountName "petrov" `
+  -UserPrincipalName "petrov@internal.lab" `
+  -AccountPassword $pw -Enabled $true -PasswordNeverExpires $true
+
+Add-ADGroupMember -Identity "Managers"   -Members "ivanov"
+Add-ADGroupMember -Identity "Developers" -Members "petrov"
+----
+
+Проверка членства:
+
+[source,powershell]
+----
+Get-ADPrincipalGroupMembership ivanov | Select-Object -ExpandProperty name
+Get-ADPrincipalGroupMembership petrov | Select-Object -ExpandProperty name
+----
+
+IMPORTANT: Имена групп и учёток — только латиницей. Кириллица отклоняется с
+ошибкой `must use English (ASCII) characters` (политика D28, тест T16).
+
+=== 1.4 Доступ к API агента
+
+`[DC]`
+
+[source,powershell]
+----
+New-NetFirewallRule -DisplayName "AdIdentity Agent API" -Direction Inbound `
+  -Protocol TCP -LocalPort 8443 -RemoteAddress 10.0.1.254 -Action Allow
+----
+
+== Часть 2. Плагин на OPNsense
+
+=== 2.1 Установка
+
+`[FW]`
+
+[source,sh]
+----
+pkg install -y git
+git clone https://github.com/kolixxx/AdIdentityDC.git /root/AdIdentityDC
+cd /root/AdIdentityDC && ./plugin/install.sh
+----
+
+В конце вывода должны быть все три строки:
+
+* `installed N file(s)`
+* `configctl adidentity session-list -> {"status": "ok"...`
+* `boot hook  -> /usr/local/etc/rc.syshook.d/start/99-adidentity`
+
+Отсутствие последней означает старую версию без исправления D31 — восстановление
+после перезагрузки (T11) провалится.
+
+=== 2.2 Настройки
+
+`[UI]` Firewall → AdIdentity → Settings:
+
+[cols="2,1,2"]
+|===
+|Поле |Значение для теста |Комментарий
+
+|`Enable`
+|вкл
+|
+
+|`Shared token`
+|общий токен
+|тот же, что уйдёт в агент
+
+|`Agent base URL`
+|`http://10.0.1.99:8443`
+|нужен только для resync
+
+|`Monitored groups`
+|`Managers`, `Developers` (по строке)
+|только эти группы станут алиасами
+
+|`Enable user aliases`
+|выкл
+|включим в T14
+
+|`User alias prefix`
+|`u_`
+|
+
+|`Auto-create aliases`
+|вкл
+|иначе алиасы придётся заводить руками
+
+|`Require ASCII names for aliases`
+|вкл
+|
+
+|`Kill connections when access is revoked`
+|выкл
+|включим в T15
+
+|`Session TTL (seconds)`
+|`180`
+|только на время теста, боевое значение `28800`
+|===
+
+Нажать **Apply**.
+
+IMPORTANT: `Apply` обязателен даже без изменений: он перегенерирует
+`/usr/local/etc/adidentity.conf` и регистрирует задачу истечения сессий в cron.
+Без неё просроченные адреса останутся в правилах.
+
+=== 2.3 Проверка установки
+
+`[FW]`
+
+[source,sh]
+----
+configctl adidentity session-list                       # {"status": "ok", "sessions": [], "count": 0}
+cat /usr/local/etc/adidentity.conf                      # настройки из UI
+grep adidentity /var/cron/tabs/nobody                   # задача истечения зарегистрирована
+ls -l /usr/local/etc/rc.syshook.d/start/99-adidentity   # хук на месте и исполняемый
+----
+
+== Часть 3. Агент на DC
+
+=== 3.1 Сборка
+
+На машине с .NET 8 SDK (не на DC):
+
+[source,powershell]
+----
+dotnet publish agent\src\AdIdentity.Agent.Service\AdIdentity.Agent.Service.csproj `
+  -c Release -r win-x64 --self-contained true -o publish\agent
+----
+
+Скопировать `publish\agent` в `C:\AdIdentity` на DC. Копируется результат
+сборки, не исходники.
+
+=== 3.2 Конфигурация под тест
+
+`C:\AdIdentity\appsettings.json`:
+
+[source,json]
+----
+{
+  "Logging": { "LogLevel": { "Default": "Information" } },
+  "AdIdentity": {
+    "PluginBaseUrl": "http://10.0.1.254",
+    "SharedToken": "ВСТАВИТЬ_ТОТ_ЖЕ_ТОКЕН",
+    "AllowInsecureTransport": true,
+    "ListenAddr": "+",
+    "ListenPort": 8443,
+    "ApiUseHttps": false,
+    "SessionTtlSec": 180,
+    "PushRetryCount": 3,
+    "PushRetryDelayMs": 500,
+    "ReconcileIntervalSec": 120,
+    "ActivityRefreshMinIntervalSec": 60,
+    "ActivityRecreateEnabled": true,
+    "LoginMemoryHours": 24,
+    "MonitoredGroups": [ "Managers", "Developers" ],
+    "Ldap": {
+      "UseStubResolver": false,
+      "Host": "dc01.internal.lab",
+      "Port": 389,
+      "UseSsl": false,
+      "BindDn": "",
+      "BindPassword": "",
+      "BaseDn": "DC=internal,DC=lab",
+      "UseNestedGroups": true,
+      "CacheSeconds": 600
+    },
+    "Events": {
+      "UseStubCollector": false,
+      "Accept4768": true,
+      "Accept4769": true,
+      "Accept4624": true,
+      "LogonTypes4624": [ 10 ]
+    }
+  }
+}
+----
+
+Три поля, на которых спотыкаются чаще всего:
+
+* `AllowInsecureTransport: true` — обязателен при `http://`, иначе агент
+  намеренно не стартует и пишет `Refusing to push to ... over plain HTTP`;
+* `ListenAddr: "+"` — иначе resync со стороны плагина не дойдёт, `0.0.0.0`
+  не годится;
+* `SessionTtlSec: 180` — **только на время теста**. Это значение и решает, когда
+  истечёт сессия (см. врезку в T6), боевое — `28800`.
+
+=== 3.3 Первый запуск в консоли
+
+Весь прогон удобнее делать с агентом в консоли: видно каждое событие.
+Службой оформим в T9.
+
+`[DC]`
+
+[source,powershell]
+----
+cd C:\AdIdentity
+.\AdIdentity.Agent.Service.exe
+----
+
+Ожидаемые строки старта:
+
+* `Agent API listening on http://+:8443/`
+* `LDAP connected to dc01.internal.lab:389 ssl=False`
+* `Security Event Log collector started with query: ...`
+* предупреждение про plain HTTP — ожидаемо при `http://`
+
+== Часть 4. Правила firewall для теста
+
+Плагин правил **не создаёт**, это работа администратора. Для тестов нужна
+изолирующая пара правил, иначе результаты будут недоказательны: если спорный
+трафик разрешён ещё и общим правилом LAN→WAN, снятие адреса из алиаса никак не
+проявится (на этом сгорел первый прогон D30).
+
+`[UI]` Firewall → Rules → LAN, **в этом порядке сверху вниз**:
+
+[cols="1,2,2"]
+|===
+|# |Правило |Зачем
+
+|1
+|`Pass`, source `Managers`, destination `8.8.8.8`, protocol ICMP
+|проверяемый доступ
+
+|2
+|`Block`, source `LAN net`, destination `8.8.8.8`, protocol ICMP
+|отрезает все обходные пути
+|===
+
+Проверка «в обе стороны» одним пингом с рабочей станции: идёт — адрес в алиасе
+и правило 1 сработало; не идёт — адреса в алиасе нет.
+
+`[PC]`
+
+[source,powershell]
+----
+ping -t 8.8.8.8
+----
+
+== Часть 5. Прогон
+
+=== T1 · Агент отвечает (критерий 3)
+
+`[DC]`
+
+[source,powershell]
+----
+$t = "<ТОКЕН>"
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health" -Headers @{Authorization="Bearer $t"}
+----
+
+Ожидание: `status: ok`, поле `sessions` с числом.
+
+=== T2 · Авторизация API плагина (критерий 2)
+
+`[FW]`
+
+[source,sh]
+----
+curl -s -o /dev/null -w '%{http_code}\n' http://10.0.1.254/api/adidentity/session/list
+curl -s -H "Authorization: Bearer <ТОКЕН>" http://10.0.1.254/api/adidentity/session/list
+----
+
+Ожидание: `401` без токена, JSON со списком сессий с токеном.
+
+=== T3 · Вход пользователя наполняет alias (критерий 4)
+
+. `[PC]` войти в систему как `INTERNAL\ivanov`.
+. `[DC]` в логе агента: `Session upserted INTERNAL\ivanov 10.0.1.10 groups=1`.
+. `[FW]` проверить обе стороны:
+
+[source,sh]
+----
+configctl adidentity session-list
+pfctl -t Managers -T show
+pfctl -t Developers -T show
+----
+
+Ожидание: одна сессия с `groups: ["Managers"]` и `expires_at`; `Managers` =
+`10.0.1.10`; `Developers` пуст.
+
+NOTE: `groups=0` в логе означает несовпадение `BaseDn`, `MonitoredGroups` или
+членства — сессия дойдёт, но alias останется пустым.
+
+WARNING: У alias типа External поле `Content` в редакторе алиасов **всегда
+пустое** — адреса живут в runtime-таблице pf. Смотреть только `pfctl`.
+
+=== T4 · Правило по alias матчит трафик (критерий 5)
+
+`[PC]` при работающем `ping -t 8.8.8.8` — ответы идут.
+
+`[FW]` состояния видны:
+
+[source,sh]
+----
+pfctl -ss | grep 8.8.8.8
+----
+
+Ожидание: пинг проходит благодаря правилу 1; счётчик правила в
+Firewall → Rules растёт.
+
+=== T5 · Второй пользователь на том же адресе (критерий 9, D1)
+
+Ключевой тест на корректность: новый пользователь не должен унаследовать
+права предыдущего владельца адреса.
+
+. `[PC]` выйти из сессии `ivanov`, войти как `INTERNAL\petrov` **с той же
+  машины**, не дожидаясь TTL.
+. `[FW]`:
+
+[source,sh]
+----
+pfctl -t Managers -T show      # пусто
+pfctl -t Developers -T show    # 10.0.1.10
+configctl adidentity session-list
+----
+
+. `[DC]` сверить агента:
+
+[source,powershell]
+----
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health" -Headers @{Authorization="Bearer $t"}
+----
+
+Ожидание: адрес ушёл из `Managers` в `Developers`; ровно **одна** сессия и у
+плагина, и у агента (`sessions: 1`).
+
+IMPORTANT: Проверять надо обе стороны. Если бы агент сохранил обе записи,
+периодический re-push через 2 минуты вернул бы `ivanov` в `Managers`, и адрес
+оказался бы в двух группах сразу.
+
+Пинг при этом прекращается — `petrov` не в `Managers`. Это тоже результат.
+
+=== T6 · Истечение по TTL (критерий 6, D5)
+
+. `[PC]` выйти из системы (чтобы активность не продлевала сессию).
+. Подождать `SessionTtlSec` (180 с) плюс до 2 минут на срабатывание cron, либо
+  ускорить вручную:
+
+`[FW]`
+
+[source,sh]
+----
+configctl adidentity expire
+pfctl -t Developers -T show
+----
+
+Ожидание: в ответе `expired: 1` и `ips_removed: 1`; таблица пуста;
+`session-list` пуст.
+
+[IMPORTANT]
+====
+Поле `Session TTL` в UI плагина **не управляет сроком жизни сессии**, пока жив
+агент. Агент присылает готовый `expires_at`, и плагин его уважает; значение из
+UI применяется только к сессиям, пришедшим без этого поля. Чтобы ускорить
+истечение для теста, менять надо `SessionTtlSec` в `appsettings.json` **и
+перезапускать агент**.
+====
+
+=== T7 · Активность продлевает сессию (D22)
+
+Сессия должна жить, пока человек работает, а не умирать по будильнику.
+Сигнал активности — событие 4769 (запрос service ticket).
+
+. `[PC]` войти как `ivanov`, дождаться появления адреса в `Managers`.
+. `[FW]` запомнить `expires_at` из `configctl adidentity session-list`.
+. `[PC]` выждать больше минуты (`ActivityRefreshMinIntervalSec`), затем:
+
+[source,powershell]
+----
+klist purge
+dir \\dc01.internal.lab\sysvol
+----
+
+. `[DC]` в логе: `Session refreshed from 4769 INTERNAL\ivanov 10.0.1.10; expires ...`
+. `[FW]` `expires_at` в `session-list` сдвинулся вперёд.
+
+NOTE: Признак свежей активности — именно сдвинувшийся `expires_at`. Поле
+`event: refresh` о ней не говорит: то же значение ставит периодический re-push
+агента, который срок не двигает.
+
+NOTE: Без `klist purge` события можно не дождаться — service ticket живёт в
+кэше около 10 часов, и обычная работа его не запрашивает заново.
+
+=== T8 · Восстановление сессии по активности (D23) · опционально
+
+Проверяет, что человек, который весь день не выходил из системы, не потеряет
+доступ после истечения TTL.
+
+Чтобы результат нельзя было спутать с обычным входом, временно отключить
+события логона:
+
+. `[DC]` в `appsettings.json`: `Accept4768: false`, `Accept4624: false`,
+  перезапустить агент.
+. `[PC]` оставаясь в системе, дождаться истечения сессии (180 с) — адрес уходит
+  из `Managers`.
+. `[PC]` `klist purge` и обращение к `\\dc01.internal.lab\sysvol`.
+. `[DC]` в логе: `Session restored from 4769 for remembered logon INTERNAL\ivanov 10.0.1.10 groups=1`.
+. `[FW]` адрес снова в `Managers`.
+. Вернуть `Accept4768: true`, `Accept4624: true`, перезапустить агент.
+
+Ожидание: восстановление сработало только потому, что пару `пользователь+адрес`
+подтвердил более ранний реальный вход (файл `login-memory.json`). Функция
+отключается флагом `ActivityRecreateEnabled: false` без пересборки.
+
+=== T9 · Перезапуск службы агента (критерий 8, D8)
+
+Сначала оформить агент службой. Консольный процесс остановить, иначе порт занят.
+
+`[DC]`
+
+[source,powershell]
+----
+New-Service -Name "AdIdentityAgent" `
+  -BinaryPathName "C:\AdIdentity\AdIdentity.Agent.Service.exe" `
+  -DisplayName "AdIdentity Agent" -StartupType Automatic
+Start-Service AdIdentityAgent
+----
+
+NOTE: `sc.exe create` спотыкается на кавычках в пути и печатает справку вместо
+создания службы. Использовать `New-Service`.
+
+Затем при живой сессии:
+
+[source,powershell]
+----
+Restart-Service AdIdentityAgent
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health" -Headers @{Authorization="Bearer $t"}
+----
+
+`[FW]`
+
+[source,sh]
+----
+pfctl -t Managers -T show
+----
+
+Ожидание: `sessions` у агента не обнулился (состояние поднято из
+`%ProgramData%\AdIdentity\sessions.json`), адрес в алиасе не пропал.
+
+[NOTE]
+====
+Под службой агент пишет в журнал Windows: **Application**, источник
+`AdIdentity Agent`. По умолчанию туда попадают только Warning и выше, поэтому
+`Session upserted` там не будет. Для наблюдения за прогоном удобнее консольный
+запуск, а для службы — API `/api/v1/sessions`. Либо поднять уровень в
+`appsettings.json`:
+
+[source,json]
+----
+"Logging": { "LogLevel": { "Default": "Information" },
+             "EventLog": { "LogLevel": { "Default": "Information" } } }
+----
+====
+
+=== T10 · Отказ пустого resync (D8)
+
+Перезапущенный агент с пустым состоянием не должен стирать живые алиасы.
+
+. `[PC]` войти, убедиться, что адрес в алиасе.
+. `[DC]`:
+
+[source,powershell]
+----
+Stop-Service AdIdentityAgent
+Remove-Item "$env:ProgramData\AdIdentity\sessions.json"
+Start-Service AdIdentityAgent
+----
+
+. `[UI]` Firewall → AdIdentity → кнопка **Resync from Agent**.
+
+Ожидание: resync отклонён с текстом
+`refusing empty agent resync: local store still has 1 session(s)...`;
+`pfctl -t Managers -T show` по-прежнему показывает адрес.
+
+Вернуть стенд: релог пользователя восстановит состояние агента.
+
+=== T11 · Перезагрузка OPNsense (критерий 7, D2, D31)
+
+. `[PC]` войти, убедиться, что адрес в `Managers`.
+. `[UI]` System → Reboot.
+. `[FW]` **сразу** после загрузки, не выжидая:
+
+[source,sh]
+----
+pfctl -t Managers -T show
+grep -i adidentity /var/log/configd/latest.log | tail
+----
+
+Ожидание: адрес уже на месте; в логе есть `adidentity reproject` со временем
+загрузки.
+
+[IMPORTANT]
+====
+Тест засчитывается только по состоянию **сразу** после загрузки. Если выждать
+пару минут, таблицу наполнит страховочная сверка из cron, и провал основного
+механизма останется незамеченным — ровно так дефект D31 и прожил до первой
+реальной перезагрузки.
+
+Смотреть именно `/var/log/configd/latest.log`: плагин вызывается через
+`configctl`, и в `/var/log/system/latest.log` по `adidentity` не будет ничего.
+====
+
+=== T12 · Ремонт расхождения pf-таблицы (D21)
+
+Плагин должен чинить состояние таблиц, которое испортили в обход него.
+
+`[FW]` при живой сессии, в обе стороны:
+
+[source,sh]
+----
+pfctl -t Managers -T flush          # потеря адреса
+configctl adidentity expire         # или подождать до 2 минут
+pfctl -t Managers -T show           # адрес вернулся
+
+pfctl -t Managers -T add 10.0.1.77  # лишний адрес
+configctl adidentity expire
+pfctl -t Managers -T show           # лишнего нет
+----
+
+Ожидание: в ответе `expire` видно `ips_added: 1` в первом случае и
+`ips_removed: 1` во втором; таблица приведена к списку сессий.
+
+NOTE: Периодический пуш агента эту задачу не решает: `upsert` применяет только
+разницу между состояниями, известными плагину, а сессия не менялась. Дрейф
+лечит сверка, то есть `expire` и `reproject`.
+
+=== T13 · Плагин недоступен: повторы и догон (D6, D7) · опционально
+
+Удобнее проверять консольным запуском агента.
+
+. `[DC]` остановить службу, в `appsettings.json` временно указать неверный порт:
+  `"PluginBaseUrl": "http://10.0.1.254:9"`, запустить в консоли.
+. `[PC]` войти.
+
+Ожидание в логе: строки
+`Plugin upsert attempt 1/4 failed; retrying in 00:00:00.5000000`, далее с
+удвоением паузы, затем `Plugin upsert failed`.
+
+. Вернуть правильный адрес, перезапустить агент.
+
+Ожидание: не дожидаясь нового входа, в пределах `ReconcileIntervalSec` (120 с)
+агент дотолкает активные сессии, и адрес появится в алиасе.
+
+=== T14 · Персональные алиасы (D29) · опционально
+
+. `[UI]` включить `Enable user aliases`, **Apply**.
+. `[PC]` войти как `ivanov`.
+. `[FW]`:
+
+[source,sh]
+----
+pfctl -t Managers -T show     # 10.0.1.10
+pfctl -t u_ivanov -T show     # 10.0.1.10
+cat /var/db/adidentity/managed_aliases.json
+----
+
+. Проверить уборку — выключить галочку, **Apply**, затем:
+
+[source,sh]
+----
+configctl adidentity expire
+pfctl -t u_ivanov -T show     # пусто
+----
+
+Ожидание: личный alias создаётся автоматически и наполняется; после выключения
+функции (или после истечения сессии) очищается и выпадает из реестра
+`managed_aliases.json`.
+
+IMPORTANT: Сам объект alias в `config.xml` не удаляется — остаётся пустым.
+Удаление автосозданных алиасов при увольнении пользователя это ручная операция.
+
+=== T15 · Разрыв открытых соединений при отзыве (D30) · опционально
+
+Снятие адреса из алиаса влияет только на **новые** соединения: `pf` проверяет
+правила на первом пакете, дальше живёт state.
+
+. `[UI]` включить `Kill connections when access is revoked`, **Apply**.
+. `[PC]` войти как `ivanov`, запустить `ping -t 8.8.8.8` — идёт.
+. `[FW]` дождаться истечения сессии или ускорить:
+
+[source,sh]
+----
+configctl adidentity expire
+pfctl -ss | grep 8.8.8.8
+----
+
+Ожидание: в ответе `ips_removed: 1` и `states_killed: 1`; состояний по
+`8.8.8.8` нет; пинг переходит в `Request timed out` и **сам не восстанавливается**.
+
+Для сравнения — с выключенной галочкой пинг продолжает идти, потому что живёт
+уже установленное состояние.
+
+NOTE: Тест доказателен только при изолирующей паре правил из части 4. Если
+трафик разрешает ещё и общее правило, состояния будут созданы заново и эффекта
+не увидеть. Смена групп у того же пользователя соединения не рвёт — адрес он не
+терял.
+
+NOTE: `states_killed: N` считает адреса, для которых вызывали kill, а не число
+снятых состояний.
+
+=== T16 · Политика ASCII-имён (D28) · опционально
+
+. `[DC]` создать группу с кириллическим именем и добавить в неё `ivanov`.
+. `[UI]` добавить это имя в `Monitored groups`, **Apply**.
+. `[PC]` релог.
+
+Ожидание: alias не создаётся, в ответе плагина ошибка
+`must use English (ASCII) characters`. Сессия при этом не теряется — отклонено
+именно имя алиаса.
+
+Вернуть стенд: убрать группу из `Monitored groups`.
+
+== Часть 6. Автотесты
+
+Запускаются на машине разработки, стенд не нужен.
+
+[source,powershell]
+----
+dotnet test agent\AdIdentity.Agent.sln
+python3 plugin\tests\test_session_store.py
+----
+
+Ожидание: всё зелёное (агент — 87 тестов, плагин — 62).
+
+После любой ручной правки Python на firewall обязательно:
+
+`[FW]`
+
+[source,sh]
+----
+python3 -m py_compile /usr/local/opnsense/scripts/adidentity/session_store.py
+----
+
+NOTE: Синтаксическая ошибка в этом файле кладёт плагин целиком, а API при этом
+отвечает пустым телом без текста ошибки (так был найден D24).
+
+== Часть 7. Где что смотреть
+
+[cols="2,3"]
+|===
+|Что нужно увидеть |Где смотреть
+
+|Сессии глазами агента
+|`[DC]` `GET /api/v1/sessions`, файл `%ProgramData%\AdIdentity\sessions.json`
+
+|Память подтверждённых логинов (D23)
+|`[DC]` `%ProgramData%\AdIdentity\login-memory.json`
+
+|Лог агента
+|консольный запуск; под службой — журнал Application, источник
+`AdIdentity Agent` (по умолчанию только Warning и выше)
+
+|События на DC
+|`[DC]` `Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4768}`
+
+|Сессии глазами плагина
+|`[FW]` `configctl adidentity session-list`, файл
+`/var/db/adidentity/sessions.json`
+
+|Какие алиасы плагин считает своими
+|`[FW]` `/var/db/adidentity/managed_aliases.json`
+
+|Действующие настройки плагина
+|`[FW]` `/usr/local/etc/adidentity.conf`
+
+|Содержимое алиаса
+|`[FW]` `pfctl -t <Alias> -T show` (не поле Content в GUI)
+
+|Открытые соединения адреса
+|`[FW]` `pfctl -ss \| grep <ip>`
+
+|Вызовы плагина: expire, reproject, upsert
+|`[FW]` `/var/log/configd/latest.log`
+
+|Задача истечения сессий
+|`[FW]` `grep adidentity /var/cron/tabs/nobody`
+
+|Хук восстановления при загрузке
+|`[FW]` `/usr/local/etc/rc.syshook.d/start/99-adidentity`
+|===
+
+== Часть 8. Возврат стенда в боевое состояние
+
+После прогона вернуть тестовые значения:
+
+[cols="2,1,1"]
+|===
+|Параметр |Тест |Боевое
+
+|`SessionTtlSec` (агент)
+|`180`
+|`28800`
+
+|`Session TTL` (UI плагина)
+|`180`
+|`28800`
+
+|`Accept4768` / `Accept4624`
+|менялись в T8
+|`true`
+
+|`PluginBaseUrl`
+|менялся в T13
+|`http://10.0.1.254`
+
+|`Enable user aliases`
+|включалась в T14
+|по требованиям
+
+|`Kill connections when access is revoked`
+|включалась в T15
+|по требованиям
+|===
+
+Отдельно: удалить временное правило `Block LAN net → 8.8.8.8` из части 4, если
+оно не нужно в постоянной конфигурации, и перезапустить агент после правки
+`appsettings.json`.
+
+== Чек-лист результатов
+
+[cols="1,4,1"]
+|===
+|Тест |Что доказывает |Итог
+
+|T1 |Агент жив и отвечает по API (критерий 3) |
+|T2 |Приём на плагине защищён токеном (критерий 2) |
+|T3 |Вход пользователя наполняет alias группы (критерий 4) |
+|T4 |Правило по alias влияет на трафик (критерий 5) |
+|T5 |Адрес отбирается у прежнего владельца (критерий 9, D1) |
+|T6 |Сессия истекает и адрес уходит (критерий 6, D5) |
+|T7 |Активность продлевает сессию (D22) |
+|T8 |Сессия восстанавливается по активности (D23) |
+|T9 |Перезапуск агента не теряет доступ (критерий 8, D8) |
+|T10 |Пустой агент не стирает живые алиасы (D8) |
+|T11 |Перезагрузка firewall восстанавливает таблицы сразу (критерий 7, D31) |
+|T12 |Расхождение pf-таблиц чинится само (D21) |
+|T13 |Недоступный плагин: повторы и догон (D6, D7) |
+|T14 |Персональные алиасы создаются и убираются (D29) |
+|T15 |Отзыв прав рвёт открытые соединения (D30) |
+|T16 |Неascii-имена отклоняются, а не схлопываются (D28) |
+|===
+
+== Что заведомо не проверяется
+
+Это ограничения v1, а не дефекты прогона:
+
+* адрес сохраняет права до конца TTL, даже если за ним оказалось другое
+  устройство без входа в домен (D26);
+* один пользователь удерживает один адрес: VPN и второе устройство вытеснят
+  друг друга;
+* несколько контроллеров домена без отдельного коллектора (`multi-dc.adoc`);
+* путь HTTPS целиком (сертификат OPNsense и `netsh http add sslcert`) —
+  в лабе не прогонялся.
