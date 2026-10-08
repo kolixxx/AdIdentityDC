@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AdIdentity — шпаргалка и боевой тест</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --paper: #fff;
+    --ink: #1c2330;
+    --muted: #5c6778;
+    --line: #e3e6ec;
+    --accent: #1f4e8c;
+    --code-bg: #1c2330;
+    --code-ink: #e8edf5;
+    --sidebar: 250px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font: 16px/1.55 "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+  }
+  a { color: var(--accent); }
+  code {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 0.9em;
+    background: #eef1f6;
+    padding: 0.05em 0.35em;
+    border-radius: 4px;
+  }
+  pre {
+    position: relative;
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13.5px;
+    line-height: 1.45;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  .copy {
+    position: absolute; top: 8px; right: 8px;
+    border: 0; border-radius: 5px; cursor: pointer;
+    background: #3a4458; color: #d5dce8; font-size: 12px; padding: 3px 8px;
+  }
+  .copy:hover { background: #4d5a72; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 5;
+    background: #152033; color: #fff;
+    padding: 14px 28px;
+    display: flex; align-items: baseline; gap: 22px;
+    box-shadow: 0 1px 0 rgba(0,0,0,.25);
+  }
+  header.top h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header.top nav a { color: #c9d6ea; text-decoration: none; margin-right: 16px; font-size: 14px; }
+  header.top nav a:hover { color: #fff; }
+  header.top .lab { margin-left: auto; color: #9aabc4; font-size: 13px; }
+
+  .layout { display: flex; align-items: flex-start; }
+  aside {
+    position: sticky; top: 52px;
+    width: var(--sidebar); flex: none;
+    height: calc(100vh - 52px); overflow: auto;
+    padding: 18px 14px 40px 22px;
+    font-size: 13.5px;
+  }
+  aside p { margin: 16px 0 6px; color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  aside a { display: block; color: #334; text-decoration: none; padding: 3px 0; }
+  aside a:hover { color: var(--accent); }
+  main { flex: 1; min-width: 0; padding: 28px 36px 80px; max-width: 920px; }
+  section { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 28px 22px; margin-bottom: 22px; }
+  h2 { font-size: 22px; margin: 28px 0 8px; scroll-margin-top: 70px; }
+  h3 { font-size: 17px; margin: 26px 0 8px; scroll-margin-top: 70px; border-top: 1px solid var(--line); padding-top: 18px; }
+  h3:first-of-type { border-top: 0; padding-top: 0; }
+  p, li { color: #243; }
+  ul, ol { padding-left: 1.3em; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 18px; font-size: 14.5px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f3f8; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfd; }
+
+  .badge {
+    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+    padding: 1px 7px; border-radius: 4px; color: #fff; vertical-align: 1px;
+  }
+  .dc { background: #1f6feb; } .fw { background: #c2410c; }
+  .pc { background: #15803d; } .ui { background: #6d28d9; }
+  .opt { font-size: 12px; color: #6b4f1d; background: #fdecc8; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+
+  .call { border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 14.5px; }
+  .call strong { display: block; margin-bottom: 2px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+  .important { background: #fff6e8; border-left: 4px solid #d97706; }
+  .note { background: #eef5ff; border-left: 4px solid #2563eb; }
+  .warning { background: #fdecec; border-left: 4px solid #dc2626; }
+  .expect { background: #eefaf1; border-left: 4px solid #16a34a; }
+  .expect strong { color: #166534; }
+
+  .lead { color: var(--muted); margin-top: 4px; }
+  input[type=checkbox] { width: 16px; height: 16px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>AdIdentity</h1>
+  <nav>
+    <a href="#cheatsheet">Шпаргалка</a>
+    <a href="#test">Боевой тест</a>
+    <a href="#checklist">Чек-лист</a>
+  </nav>
+  <span class="lab">DC 10.0.1.99 · OPNsense 10.0.1.254 · клиент 10.0.1.10</span>
+</header>
+
+<div class="layout">
+<aside>
+  <p>Шпаргалка</p>
+  <a href="#plugin">Плагин</a>
+  <a href="#agent">Агент</a>
+  <a href="#broken">Когда не работает</a>
+  <a href="#remember">Легко забыть</a>
+
+  <p>Боевой тест</p>
+  <a href="#howto">Как читать</a>
+  <a href="#map">Карта стенда</a>
+  <a href="#p1">1. Подготовка DC</a>
+  <a href="#p2">2. Плагин</a>
+  <a href="#p3">3. Агент</a>
+  <a href="#p4">4. Правила firewall</a>
+  <a href="#t1">T1–T16 Прогон</a>
+  <a href="#autotest">Автотесты</a>
+  <a href="#where">Где смотреть</a>
+  <a href="#restore">Возврат стенда</a>
+  <a href="#checklist">Чек-лист</a>
+  <a href="#limits">Не проверяется</a>
+</aside>
+
+<main>
+
+<!-- ===================== ШПАРГАЛКА ===================== -->
+
+<section id="cheatsheet">
+<h2>Шпаргалка по командам</h2>
+<p class="lead">Самое частое, на одной странице. Полный прогон — ниже, в «Боевом тесте».</p>
+
+<h3 id="plugin">Плагин — OPNsense, SSH под root</h3>
+<pre><code>configctl adidentity session-list    # сессии: user, ip, groups, expires_at
+configctl adidentity expire          # истечь просроченное + сверить pf-таблицы
+configctl adidentity reproject       # перезалить таблицы из sessions.json
+pfctl -t Managers -T show            # что реально лежит в alias
+pfctl -ss | grep 10.0.1.10           # открытые соединения адреса</code></pre>
+<p><code>expire</code> и <code>reproject</code> безопасно запускать руками в любой момент: они идемпотентны и чинят расхождение в обе стороны.</p>
+
+<p>Установка и обновление:</p>
+<pre><code>cd /root/AdIdentityDC &amp;&amp; git pull &amp;&amp; ./plugin/install.sh
+./plugin/install.sh -n               # dry-run, ничего не трогает
+./plugin/install.sh -u               # удалить файлы (сессии и настройки остаются)</code></pre>
+
+<p>Где что лежит:</p>
+<pre><code>/var/db/adidentity/sessions.json            # сессии
+/var/db/adidentity/managed_aliases.json     # какие alias плагин считает своими
+/usr/local/etc/adidentity.conf              # настройки из UI
+/usr/local/opnsense/scripts/adidentity/session_store.py
+/usr/local/etc/rc.syshook.d/start/99-adidentity   # восстановление при загрузке</code></pre>
+
+<p>Проверить, что всё на месте:</p>
+<pre><code>grep -i adidentity /var/log/configd/latest.log | tail   # вызовы плагина (НЕ /var/log/system)
+grep adidentity /var/cron/tabs/nobody                   # задача истечения, ставится кнопкой Apply
+ls -l /usr/local/etc/rc.syshook.d/start/99-adidentity   # хук загрузки
+python3 -m py_compile /usr/local/opnsense/scripts/adidentity/session_store.py</code></pre>
+
+<p>API. Bearer работает только для <code>session/*</code>; кнопка Resync — от сессии веб-интерфейса.</p>
+<pre><code>curl -s -H "Authorization: Bearer &lt;ТОКЕН&gt;" http://10.0.1.254/api/adidentity/session/list
+curl -s -o /dev/null -w '%{http_code}\n' http://10.0.1.254/api/adidentity/session/list   # ждём 401</code></pre>
+
+<h3 id="agent">Агент — DC, PowerShell от администратора</h3>
+<pre><code>Get-Service AdIdentityAgent
+Restart-Service AdIdentityAgent
+Stop-Service AdIdentityAgent
+cd C:\AdIdentity; .\AdIdentity.Agent.Service.exe    # в консоли видно каждое событие</code></pre>
+<pre><code>$t = "&lt;ТОКЕН&gt;"
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health"   -Headers @{Authorization="Bearer $t"}
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/sessions" -Headers @{Authorization="Bearer $t"} |
+  ConvertTo-Json -Depth 5</code></pre>
+
+<p>Файлы состояния:</p>
+<pre><code>C:\AdIdentity\appsettings.json                  # настройки, перетирается при пересборке
+%ProgramData%\AdIdentity\sessions.json          # сессии агента
+%ProgramData%\AdIdentity\login-memory.json      # подтверждённые логины (D23)</code></pre>
+
+<p>События на DC и группы:</p>
+<pre><code>Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4768} -MaxEvents 5 |
+  Format-List TimeCreated, Message
+klist purge                                      # на клиенте: запросить билеты заново
+
+Get-ADPrincipalGroupMembership ivanov | Select-Object -ExpandProperty name
+Add-ADGroupMember -Identity "Managers" -Members "ivanov"</code></pre>
+<div class="call note"><strong>Заметка</strong>
+Под службой агент пишет в журнал Windows <b>Application</b>, источник <code>AdIdentity Agent</code>, и только Warning и выше. Для наблюдения удобнее консольный запуск или <code>/api/v1/sessions</code>.</div>
+
+<h3 id="broken">Когда что-то не работает</h3>
+<p>Идти сверху вниз и чинить тот слой, где первое «нет».</p>
+<ol>
+  <li>Событие на DC есть? — <code>Get-WinEvent ... Id=4768</code></li>
+  <li>Сессия у агента? — <code>GET /api/v1/sessions</code></li>
+  <li>Сессия у плагина? — <code>configctl adidentity session-list</code></li>
+  <li>Адрес в pf-таблице? — <code>pfctl -t Managers -T show</code></li>
+  <li>Правило firewall по этому alias существует и стоит выше запрещающих?</li>
+</ol>
+<table>
+  <tr><th>Симптом</th><th>Что делать</th></tr>
+  <tr><td>Сессия есть, адреса в таблице нет</td><td><code>configctl adidentity reproject</code></td></tr>
+  <tr><td>В таблице лишний адрес</td><td><code>configctl adidentity expire</code></td></tr>
+  <tr><td>Просроченное не уходит</td><td>Не нажали <b>Apply</b> — нет задачи в cron</td></tr>
+  <tr><td>После ребута таблица пуста</td><td>Проверить хук <code>99-adidentity</code> и <code>reproject</code> в логе configd</td></tr>
+  <tr><td><code>groups=0</code> в логе агента</td><td><code>BaseDn</code>, <code>MonitoredGroups</code> или членство в AD</td></tr>
+  <tr><td>Агент не стартует, <code>Refusing to push</code></td><td><code>AllowInsecureTransport: true</code> при <code>http://</code></td></tr>
+  <tr><td>Пустой ответ API плагина</td><td>Синтаксис Python: <code>python3 -m py_compile ...</code></td></tr>
+</table>
+
+<h3 id="remember">Важное, о чём легко забыть</h3>
+<ul>
+  <li>Поле <b>Content</b> у alias типа External всегда пустое — смотреть только <code>pfctl</code>.</li>
+  <li>Срок жизни сессии задаёт <b>агент</b> (<code>SessionTtlSec</code>). Поле TTL в UI плагина применяется лишь к сессиям без <code>expires_at</code>.</li>
+  <li><b>Apply</b> в UI обязателен после установки: он пишет <code>adidentity.conf</code> и регистрирует cron.</li>
+  <li>Плагин <b>не создаёт правила firewall</b> — только алиасы.</li>
+  <li>Вызовы плагина видны в <code>/var/log/configd/latest.log</code>. В <code>/var/log/system/</code> их нет.</li>
+</ul>
+</section>
+
+<!-- ===================== БОЕВОЙ ТЕСТ ===================== -->
+
+<section id="test">
+<h2>Боевой тест: полный прогон с нуля</h2>
+<p>По этому разделу можно развернуть стенд с пустого места и проверить весь функционал: от создания учёток в AD до отзыва прав и поведения после перезагрузки. Порядок шагов обязателен — каждый следующий опирается на предыдущий.</p>
+
+<h3 id="howto">Как читать</h3>
+<p>Каждая команда помечена машиной:</p>
+<table>
+  <tr><th>Метка</th><th>Где выполнять</th></tr>
+  <tr><td><span class="badge dc">DC</span></td><td>Контроллер домена, PowerShell от администратора</td></tr>
+  <tr><td><span class="badge fw">FW</span></td><td>OPNsense, SSH под root (или Interfaces → Shell в GUI)</td></tr>
+  <tr><td><span class="badge pc">PC</span></td><td>Доменная рабочая станция, под тестовым пользователем</td></tr>
+  <tr><td><span class="badge ui">UI</span></td><td>Веб-интерфейс OPNsense</td></tr>
+</table>
+<p>Тест засчитан, только если результат совпал с блоком «Ожидание». Если провалился — чинить этот слой и повторять, а не идти дальше.</p>
+
+<h3 id="map">Карта стенда</h3>
+<p>Значения лабораторные, подставьте свои.</p>
+<table>
+  <tr><th>Что</th><th>Значение</th><th>Примечание</th></tr>
+  <tr><td>Домен</td><td><code>internal.lab</code>, NetBIOS <code>INTERNAL</code></td><td>Base DN <code>DC=internal,DC=lab</code></td></tr>
+  <tr><td>DC</td><td><code>10.0.1.99</code>, <code>dc01.internal.lab</code></td><td>Агент ставится сюда</td></tr>
+  <tr><td>OPNsense</td><td><code>10.0.1.254</code></td><td>GUI и API по HTTP, порт 80</td></tr>
+  <tr><td>Рабочая станция</td><td><code>10.0.1.10</code></td><td>В домене, DNS на DC</td></tr>
+  <tr><td>Порт API агента</td><td><code>8443</code></td><td>Нужен только для resync со стороны плагина</td></tr>
+  <tr><td>Общий токен</td><td>одна длинная случайная строка</td><td>Одинаковая на обеих сторонах, в репозиторий не попадает</td></tr>
+  <tr><td>Таймзона</td><td>UTC+3 на всех машинах</td><td>Важен совпадающий UTC, а не одинаковая зона</td></tr>
+</table>
+
+<h3 id="p1">Часть 1. Подготовка DC</h3>
+
+<h3>1.1 Часы</h3>
+<p><span class="badge dc">DC</span></p>
+<pre><code>tzutil /s "Russian Standard Time"
+w32tm /resync /force
+[DateTimeOffset]::UtcNow</code></pre>
+<p><span class="badge fw">FW</span></p>
+<pre><code>date -u</code></pre>
+<div class="call important"><strong>Важно</strong>
+UTC должен совпадать с точностью до секунд. Агент проставляет срок жизни сессии по своим часам, плагин истекает по своим: расхождение либо оставляет доступ навсегда, либо снимает его мгновенно.</div>
+
+<h3>1.2 Аудит событий</h3>
+<p>Нужны три подкатегории: Kerberos TGT (4768), Kerberos service ticket (4769, для продления сессии) и Logon (4624, для RDP).</p>
+<p><span class="badge dc">DC</span></p>
+<pre><code>auditpol /set /subcategory:"{0CCE9242-69AE-11D9-BED3-505054503030}" /success:enable  # Kerberos Authentication Service
+auditpol /set /subcategory:"{0CCE9240-69AE-11D9-BED3-505054503030}" /success:enable  # Kerberos Service Ticket Operations
+auditpol /set /subcategory:"{0CCE9215-69AE-11D9-BED3-505054503030}" /success:enable  # Logon
+auditpol /get /category:* | Select-String -Pattern "Kerberos|Logon"</code></pre>
+<div class="call note"><strong>Заметка</strong>
+GUID вместо названия — намеренно: имена подкатегорий локализованы, и на русской Windows <code>/subcategory:"Logon"</code> вернёт ошибку.</div>
+<p>Проверить, что события пишутся (после входа пользователя):</p>
+<pre><code>Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4768} -MaxEvents 3 |
+  Format-List TimeCreated, Message</code></pre>
+
+<h3>1.3 Группы и учётные записи</h3>
+<p>Для полного прогона нужны <b>две группы и два пользователя</b>, разведённые без пересечений — иначе тест на вытеснение адреса (T5) ничего не докажет.</p>
+<p><span class="badge dc">DC</span></p>
+<pre><code>New-ADGroup -Name "Managers"   -GroupScope Global -GroupCategory Security
+New-ADGroup -Name "Developers" -GroupScope Global -GroupCategory Security
+
+$pw = Read-Host -AsSecureString "Пароль для тестовых учёток"
+
+New-ADUser -Name "ivanov" -SamAccountName "ivanov" `
+  -UserPrincipalName "ivanov@internal.lab" `
+  -AccountPassword $pw -Enabled $true -PasswordNeverExpires $true
+
+New-ADUser -Name "petrov" -SamAccountName "petrov" `
+  -UserPrincipalName "petrov@internal.lab" `
+  -AccountPassword $pw -Enabled $true -PasswordNeverExpires $true
+
+Add-ADGroupMember -Identity "Managers"   -Members "ivanov"
+Add-ADGroupMember -Identity "Developers" -Members "petrov"</code></pre>
+<p>Проверка членства:</p>
+<pre><code>Get-ADPrincipalGroupMembership ivanov | Select-Object -ExpandProperty name
+Get-ADPrincipalGroupMembership petrov | Select-Object -ExpandProperty name</code></pre>
+<div class="call important"><strong>Важно</strong>
+Имена групп и учёток — только латиницей. Кириллица отклоняется с ошибкой <code>must use English (ASCII) characters</code> (политика D28, тест T16).</div>
+
+<h3>1.4 Доступ к API агента</h3>
+<p><span class="badge dc">DC</span></p>
+<pre><code>New-NetFirewallRule -DisplayName "AdIdentity Agent API" -Direction Inbound `
+  -Protocol TCP -LocalPort 8443 -RemoteAddress 10.0.1.254 -Action Allow</code></pre>
+
+<h3 id="p2">Часть 2. Плагин на OPNsense</h3>
+
+<h3>2.1 Установка</h3>
+<p><span class="badge fw">FW</span></p>
+<pre><code>pkg install -y git
+git clone https://github.com/kolixxx/AdIdentityDC.git /root/AdIdentityDC
+cd /root/AdIdentityDC &amp;&amp; ./plugin/install.sh</code></pre>
+<p>В конце вывода должны быть все три строки:</p>
+<ul>
+  <li><code>installed N file(s)</code></li>
+  <li><code>configctl adidentity session-list -&gt; {"status": "ok"...</code></li>
+  <li><code>boot hook -&gt; /usr/local/etc/rc.syshook.d/start/99-adidentity</code></li>
+</ul>
+<p>Отсутствие последней означает старую версию без исправления D31 — восстановление после перезагрузки (T11) провалится.</p>
+
+<h3>2.2 Настройки</h3>
+<p><span class="badge ui">UI</span> Firewall → AdIdentity → Settings, затем <b>Apply</b>.</p>
+<table>
+  <tr><th>Поле</th><th>Значение для теста</th><th>Комментарий</th></tr>
+  <tr><td>Enable</td><td>вкл</td><td></td></tr>
+  <tr><td>Shared token</td><td>общий токен</td><td>тот же, что уйдёт в агент</td></tr>
+  <tr><td>Agent base URL</td><td><code>http://10.0.1.99:8443</code></td><td>нужен только для resync</td></tr>
+  <tr><td>Monitored groups</td><td><code>Managers</code>, <code>Developers</code> по строке</td><td>только эти группы станут алиасами</td></tr>
+  <tr><td>Enable user aliases</td><td>выкл</td><td>включим в T14</td></tr>
+  <tr><td>User alias prefix</td><td><code>u_</code></td><td></td></tr>
+  <tr><td>Auto-create aliases</td><td>вкл</td><td>иначе алиасы придётся заводить руками</td></tr>
+  <tr><td>Require ASCII names</td><td>вкл</td><td></td></tr>
+  <tr><td>Kill connections when access is revoked</td><td>выкл</td><td>включим в T15</td></tr>
+  <tr><td>Session TTL (seconds)</td><td><code>180</code></td><td>только на время теста, боевое — 28800</td></tr>
+</table>
+<div class="call important"><strong>Важно</strong>
+Apply обязателен даже без изменений: он перегенерирует <code>/usr/local/etc/adidentity.conf</code> и регистрирует задачу истечения сессий в cron. Без неё просроченные адреса останутся в правилах.</div>
+
+<h3>2.3 Проверка установки</h3>
+<p><span class="badge fw">FW</span></p>
+<pre><code>configctl adidentity session-list                       # {"status": "ok", "sessions": [], "count": 0}
+cat /usr/local/etc/adidentity.conf                      # настройки из UI
+grep adidentity /var/cron/tabs/nobody                   # задача истечения зарегистрирована
+ls -l /usr/local/etc/rc.syshook.d/start/99-adidentity   # хук на месте и исполняемый</code></pre>
+
+<h3 id="p3">Часть 3. Агент на DC</h3>
+
+<h3>3.1 Сборка</h3>
+<p>На машине с .NET 8 SDK (не на DC). Скопировать <code>publish\agent</code> в <code>C:\AdIdentity</code> на DC — результат сборки, не исходники.</p>
+<pre><code>dotnet publish agent\src\AdIdentity.Agent.Service\AdIdentity.Agent.Service.csproj `
+  -c Release -r win-x64 --self-contained true -o publish\agent</code></pre>
+
+<h3>3.2 Конфигурация под тест</h3>
+<p><code>C:\AdIdentity\appsettings.json</code>:</p>
+<pre><code>{
+  "Logging": { "LogLevel": { "Default": "Information" } },
+  "AdIdentity": {
+    "PluginBaseUrl": "http://10.0.1.254",
+    "SharedToken": "ВСТАВИТЬ_ТОТ_ЖЕ_ТОКЕН",
+    "AllowInsecureTransport": true,
+    "ListenAddr": "+",
+    "ListenPort": 8443,
+    "ApiUseHttps": false,
+    "SessionTtlSec": 180,
+    "PushRetryCount": 3,
+    "PushRetryDelayMs": 500,
+    "ReconcileIntervalSec": 120,
+    "ActivityRefreshMinIntervalSec": 60,
+    "ActivityRecreateEnabled": true,
+    "LoginMemoryHours": 24,
+    "MonitoredGroups": [ "Managers", "Developers" ],
+    "Ldap": {
+      "UseStubResolver": false,
+      "Host": "dc01.internal.lab",
+      "Port": 389,
+      "UseSsl": false,
+      "BindDn": "",
+      "BindPassword": "",
+      "BaseDn": "DC=internal,DC=lab",
+      "UseNestedGroups": true,
+      "CacheSeconds": 600
+    },
+    "Events": {
+      "UseStubCollector": false,
+      "Accept4768": true,
+      "Accept4769": true,
+      "Accept4624": true,
+      "LogonTypes4624": [ 10 ]
+    }
+  }
+}</code></pre>
+<p>Три поля, на которых спотыкаются чаще всего:</p>
+<ul>
+  <li><code>AllowInsecureTransport: true</code> — обязателен при <code>http://</code>, иначе агент намеренно не стартует и пишет <code>Refusing to push ... over plain HTTP</code>.</li>
+  <li><code>ListenAddr: "+"</code> — иначе resync со стороны плагина не дойдёт. <code>0.0.0.0</code> не годится.</li>
+  <li><code>SessionTtlSec: 180</code> — <b>только на время теста</b>. Именно это значение решает, когда истечёт сессия (см. врезку в T6). Боевое — <code>28800</code>.</li>
+</ul>
+
+<h3>3.3 Первый запуск в консоли</h3>
+<p>Весь прогон удобнее делать с агентом в консоли: видно каждое событие. Службой оформим в T9.</p>
+<p><span class="badge dc">DC</span></p>
+<pre><code>cd C:\AdIdentity
+.\AdIdentity.Agent.Service.exe</code></pre>
+<p>Ожидаемые строки старта:</p>
+<ul>
+  <li><code>Agent API listening on http://+:8443/</code></li>
+  <li><code>LDAP connected to dc01.internal.lab:389 ssl=False</code></li>
+  <li><code>Security Event Log collector started with query: ...</code></li>
+  <li>предупреждение про plain HTTP — ожидаемо при <code>http://</code></li>
+</ul>
+
+<h3 id="p4">Часть 4. Правила firewall для теста</h3>
+<p>Плагин правил <b>не создаёт</b> — это работа администратора. Для тестов нужна изолирующая пара правил, иначе результаты недоказательны: если спорный трафик разрешён ещё и общим правилом LAN→WAN, снятие адреса из алиаса никак не проявится (на этом сгорел первый прогон D30).</p>
+<p><span class="badge ui">UI</span> Firewall → Rules → LAN, <b>в этом порядке сверху вниз</b>:</p>
+<table>
+  <tr><th>#</th><th>Правило</th><th>Зачем</th></tr>
+  <tr><td>1</td><td><code>Pass</code>, source <code>Managers</code>, destination <code>8.8.8.8</code>, ICMP</td><td>проверяемый доступ</td></tr>
+  <tr><td>2</td><td><code>Block</code>, source <code>LAN net</code>, destination <code>8.8.8.8</code>, ICMP</td><td>отрезает все обходные пути</td></tr>
+</table>
+<p>Проверка в обе стороны одним пингом: идёт — адрес в алиасе и правило 1 сработало; не идёт — адреса в алиасе нет.</p>
+<p><span class="badge pc">PC</span></p>
+<pre><code>ping -t 8.8.8.8</code></pre>
+
+<h3 id="t1">Часть 5. Прогон</h3>
+
+<h3 id="t1a">T1 · Агент отвечает <span class="lead">(критерий 3)</span></h3>
+<p><span class="badge dc">DC</span></p>
+<pre><code>$t = "&lt;ТОКЕН&gt;"
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health" -Headers @{Authorization="Bearer $t"}</code></pre>
+<div class="call expect"><strong>Ожидание</strong><code>status: ok</code>, поле <code>sessions</code> с числом.</div>
+
+<h3>T2 · Авторизация API плагина (критерий 2)</h3>
+<p><span class="badge fw">FW</span></p>
+<pre><code>curl -s -o /dev/null -w '%{http_code}\n' http://10.0.1.254/api/adidentity/session/list
+curl -s -H "Authorization: Bearer &lt;ТОКЕН&gt;" http://10.0.1.254/api/adidentity/session/list</code></pre>
+<div class="call expect"><strong>Ожидание</strong><code>401</code> без токена, JSON со списком сессий с токеном.</div>
+
+<h3>T3 · Вход пользователя наполняет alias (критерий 4)</h3>
+<ol>
+  <li><span class="badge pc">PC</span> войти как <code>INTERNAL\ivanov</code>.</li>
+  <li><span class="badge dc">DC</span> в логе агента: <code>Session upserted INTERNAL\ivanov 10.0.1.10 groups=1</code>.</li>
+  <li><span class="badge fw">FW</span> проверить обе стороны:</li>
+</ol>
+<pre><code>configctl adidentity session-list
+pfctl -t Managers -T show
+pfctl -t Developers -T show</code></pre>
+<div class="call expect"><strong>Ожидание</strong>Одна сессия с <code>groups: ["Managers"]</code> и <code>expires_at</code>; <code>Managers</code> = <code>10.0.1.10</code>; <code>Developers</code> пуст.</div>
+<div class="call note"><strong>Заметка</strong><code>groups=0</code> в логе означает несовпадение <code>BaseDn</code>, <code>MonitoredGroups</code> или членства: сессия дойдёт, но alias останется пустым.</div>
+<div class="call warning"><strong>Внимание</strong>У alias типа External поле Content в редакторе <b>всегда пустое</b> — адреса живут в runtime-таблице pf. Смотреть только <code>pfctl</code>.</div>
+
+<h3>T4 · Правило по alias матчит трафик (критерий 5)</h3>
+<p><span class="badge pc">PC</span> при работающем <code>ping -t 8.8.8.8</code> ответы идут.</p>
+<p><span class="badge fw">FW</span></p>
+<pre><code>pfctl -ss | grep 8.8.8.8</code></pre>
+<div class="call expect"><strong>Ожидание</strong>Пинг проходит благодаря правилу 1; счётчик правила в Firewall → Rules растёт.</div>
+
+<h3>T5 · Второй пользователь на том же адресе (критерий 9, D1)</h3>
+<p>Ключевой тест: новый пользователь не должен унаследовать права предыдущего владельца адреса.</p>
+<ol>
+  <li><span class="badge pc">PC</span> выйти из сессии <code>ivanov</code>, войти как <code>INTERNAL\petrov</code> <b>с той же машины</b>, не дожидаясь TTL.</li>
+  <li><span class="badge fw">FW</span>:</li>
+</ol>
+<pre><code>pfctl -t Managers -T show      # пусто
+pfctl -t Developers -T show    # 10.0.1.10
+configctl adidentity session-list</code></pre>
+<p><span class="badge dc">DC</span> сверить агента:</p>
+<pre><code>Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health" -Headers @{Authorization="Bearer $t"}</code></pre>
+<div class="call expect"><strong>Ожидание</strong>Адрес ушёл из <code>Managers</code> в <code>Developers</code>; ровно <b>одна</b> сессия и у плагина, и у агента (<code>sessions: 1</code>). Пинг прекращается — <code>petrov</code> не в <code>Managers</code>.</div>
+<div class="call important"><strong>Важно</strong>Проверять надо обе стороны. Если бы агент сохранил обе записи, периодический re-push через 2 минуты вернул бы <code>ivanov</code> в <code>Managers</code>, и адрес оказался бы в двух группах сразу.</div>
+
+<h3>T6 · Истечение по TTL (критерий 6, D5)</h3>
+<ol>
+  <li><span class="badge pc">PC</span> выйти из системы, чтобы активность не продлевала сессию.</li>
+  <li>Подождать <code>SessionTtlSec</code> (180 с) плюс до 2 минут на cron, либо ускорить вручную:</li>
+</ol>
+<p><span class="badge fw">FW</span></p>
+<pre><code>configctl adidentity expire
+pfctl -t Developers -T show</code></pre>
+<div class="call expect"><strong>Ожидание</strong>В ответе <code>expired: 1</code> и <code>ips_removed: 1</code>; таблица пуста; <code>session-list</code> пуст.</div>
+<div class="call important"><strong>Важно</strong>
+Поле Session TTL в UI плагина <b>не управляет сроком жизни сессии</b>, пока жив агент. Агент присылает готовый <code>expires_at</code>, и плагин его уважает; значение из UI применяется только к сессиям без этого поля. Чтобы ускорить истечение, менять надо <code>SessionTtlSec</code> в <code>appsettings.json</code> и перезапускать агент.</div>
+
+<h3>T7 · Активность продлевает сессию (D22)</h3>
+<p>Сессия должна жить, пока человек работает. Сигнал активности — событие 4769 (запрос service ticket).</p>
+<ol>
+  <li><span class="badge pc">PC</span> войти как <code>ivanov</code>, дождаться адреса в <code>Managers</code>.</li>
+  <li><span class="badge fw">FW</span> запомнить <code>expires_at</code> из <code>configctl adidentity session-list</code>.</li>
+  <li><span class="badge pc">PC</span> выждать больше минуты, затем:</li>
+</ol>
+<pre><code>klist purge
+dir \\dc01.internal.lab\sysvol</code></pre>
+<ol start="4">
+  <li><span class="badge dc">DC</span> в логе: <code>Session refreshed from 4769 INTERNAL\ivanov 10.0.1.10; expires ...</code></li>
+  <li><span class="badge fw">FW</span> <code>expires_at</code> в <code>session-list</code> сдвинулся вперёд.</li>
+</ol>
+<div class="call note"><strong>Заметка</strong>Признак свежей активности — именно сдвинувшийся <code>expires_at</code>. Поле <code>event: refresh</code> о ней не говорит: то же значение ставит периодический re-push агента, который срок не двигает. Без <code>klist purge</code> события можно не дождаться: service ticket живёт в кэше около 10 часов.</div>
+
+<h3>T8 · Восстановление сессии по активности (D23) <span class="opt">опционально</span></h3>
+<p>Проверяет, что человек, который весь день не выходил, не потеряет доступ после истечения TTL. Чтобы не спутать с обычным входом, временно отключить события логона:</p>
+<ol>
+  <li><span class="badge dc">DC</span> в <code>appsettings.json</code>: <code>Accept4768: false</code>, <code>Accept4624: false</code>, перезапустить агент.</li>
+  <li><span class="badge pc">PC</span> оставаясь в системе, дождаться истечения (180 с) — адрес уходит из <code>Managers</code>.</li>
+  <li><span class="badge pc">PC</span> <code>klist purge</code> и обращение к <code>\\dc01.internal.lab\sysvol</code>.</li>
+  <li><span class="badge dc">DC</span> в логе: <code>Session restored from 4769 for remembered logon INTERNAL\ivanov 10.0.1.10 groups=1</code>.</li>
+  <li><span class="badge fw">FW</span> адрес снова в <code>Managers</code>.</li>
+  <li>Вернуть <code>Accept4768: true</code>, <code>Accept4624: true</code>, перезапустить агент.</li>
+</ol>
+<div class="call expect"><strong>Ожидание</strong>Восстановление сработало только потому, что пару пользователь+адрес подтвердил более ранний реальный вход (<code>login-memory.json</code>). Отключается флагом <code>ActivityRecreateEnabled: false</code> без пересборки.</div>
+
+<h3>T9 · Перезапуск службы агента (критерий 8, D8)</h3>
+<p>Сначала оформить агент службой. Консольный процесс остановить, иначе порт занят.</p>
+<p><span class="badge dc">DC</span></p>
+<pre><code>New-Service -Name "AdIdentityAgent" `
+  -BinaryPathName "C:\AdIdentity\AdIdentity.Agent.Service.exe" `
+  -DisplayName "AdIdentity Agent" -StartupType Automatic
+Start-Service AdIdentityAgent</code></pre>
+<div class="call note"><strong>Заметка</strong><code>sc.exe create</code> спотыкается на кавычках в пути и печатает справку вместо создания службы. Использовать <code>New-Service</code>.</div>
+<p>Затем при живой сессии:</p>
+<pre><code>Restart-Service AdIdentityAgent
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health" -Headers @{Authorization="Bearer $t"}</code></pre>
+<p><span class="badge fw">FW</span> <code>pfctl -t Managers -T show</code></p>
+<div class="call expect"><strong>Ожидание</strong><code>sessions</code> у агента не обнулился (состояние поднято из <code>%ProgramData%\AdIdentity\sessions.json</code>), адрес в алиасе не пропал.</div>
+<div class="call note"><strong>Заметка</strong>
+Под службой в журнал Application попадают только Warning и выше, поэтому <code>Session upserted</code> там не будет. Чтобы поднять уровень, в <code>appsettings.json</code>:
+<pre><code>"Logging": { "LogLevel": { "Default": "Information" },
+             "EventLog": { "LogLevel": { "Default": "Information" } } }</code></pre>
+</div>
+
+<h3>T10 · Отказ пустого resync (D8)</h3>
+<p>Перезапущенный агент с пустым состоянием не должен стирать живые алиасы.</p>
+<ol>
+  <li><span class="badge pc">PC</span> войти, убедиться, что адрес в алиасе.</li>
+  <li><span class="badge dc">DC</span>:</li>
+</ol>
+<pre><code>Stop-Service AdIdentityAgent
+Remove-Item "$env:ProgramData\AdIdentity\sessions.json"
+Start-Service AdIdentityAgent</code></pre>
+<ol start="3">
+  <li><span class="badge ui">UI</span> Firewall → AdIdentity → кнопка <b>Resync from Agent</b>.</li>
+</ol>
+<div class="call expect"><strong>Ожидание</strong>Resync отклонён с текстом <code>refusing empty agent resync: local store still has 1 session(s)...</code>; <code>pfctl -t Managers -T show</code> по-прежнему показывает адрес. Вернуть стенд: релог пользователя восстановит состояние агента.</div>
+
+<h3>T11 · Перезагрузка OPNsense (критерий 7, D2, D31)</h3>
+<ol>
+  <li><span class="badge pc">PC</span> войти, убедиться, что адрес в <code>Managers</code>.</li>
+  <li><span class="badge ui">UI</span> System → Reboot.</li>
+  <li><span class="badge fw">FW</span> <b>сразу</b> после загрузки, не выжидая:</li>
+</ol>
+<pre><code>pfctl -t Managers -T show
+grep -i adidentity /var/log/configd/latest.log | tail</code></pre>
+<div class="call expect"><strong>Ожидание</strong>Адрес уже на месте; в логе есть <code>adidentity reproject</code> со временем загрузки.</div>
+<div class="call important"><strong>Важно</strong>
+Тест засчитывается только по состоянию <b>сразу</b> после загрузки. Если выждать пару минут, таблицу наполнит страховочная сверка из cron, и провал основного механизма останется незамеченным — так дефект D31 и прожил до первой реальной перезагрузки. Смотреть именно <code>/var/log/configd/latest.log</code>: в <code>/var/log/system/</code> по <code>adidentity</code> не будет ничего.</div>
+
+<h3>T12 · Ремонт расхождения pf-таблицы (D21)</h3>
+<p>Плагин должен чинить состояние таблиц, которое испортили в обход него. <span class="badge fw">FW</span> при живой сессии, в обе стороны:</p>
+<pre><code>pfctl -t Managers -T flush          # потеря адреса
+configctl adidentity expire         # или подождать до 2 минут
+pfctl -t Managers -T show           # адрес вернулся
+
+pfctl -t Managers -T add 10.0.1.77  # лишний адрес
+configctl adidentity expire
+pfctl -t Managers -T show           # лишнего нет</code></pre>
+<div class="call expect"><strong>Ожидание</strong>В ответе <code>expire</code> видно <code>ips_added: 1</code> в первом случае и <code>ips_removed: 1</code> во втором.</div>
+<div class="call note"><strong>Заметка</strong>Периодический пуш агента эту задачу не решает: <code>upsert</code> применяет только разницу между известными плагину состояниями, а сессия не менялась. Дрейф лечит сверка — <code>expire</code> и <code>reproject</code>.</div>
+
+<h3>T13 · Плагин недоступен: повторы и догон (D6, D7) <span class="opt">опционально</span></h3>
+<p>Удобнее проверять консольным запуском агента.</p>
+<ol>
+  <li><span class="badge dc">DC</span> остановить службу, временно указать неверный порт: <code>"PluginBaseUrl": "http://10.0.1.254:9"</code>, запустить в консоли.</li>
+  <li><span class="badge pc">PC</span> войти.</li>
+</ol>
+<div class="call expect"><strong>Ожидание</strong>В логе <code>Plugin upsert attempt 1/4 failed; retrying in 00:00:00.5000000</code>, далее с удвоением паузы, затем <code>Plugin upsert failed</code>.</div>
+<p>Вернуть правильный адрес, перезапустить агент. Не дожидаясь нового входа, в пределах <code>ReconcileIntervalSec</code> (120 с) агент дотолкает активные сессии, и адрес появится в алиасе.</p>
+
+<h3>T14 · Персональные алиасы (D29) <span class="opt">опционально</span></h3>
+<ol>
+  <li><span class="badge ui">UI</span> включить <code>Enable user aliases</code>, <b>Apply</b>.</li>
+  <li><span class="badge pc">PC</span> войти как <code>ivanov</code>.</li>
+  <li><span class="badge fw">FW</span>:</li>
+</ol>
+<pre><code>pfctl -t Managers -T show     # 10.0.1.10
+pfctl -t u_ivanov -T show     # 10.0.1.10
+cat /var/db/adidentity/managed_aliases.json</code></pre>
+<p>Проверить уборку — выключить галочку, <b>Apply</b>, затем:</p>
+<pre><code>configctl adidentity expire
+pfctl -t u_ivanov -T show     # пусто</code></pre>
+<div class="call expect"><strong>Ожидание</strong>Личный alias создаётся автоматически и наполняется; после выключения функции (или после истечения сессии) очищается и выпадает из <code>managed_aliases.json</code>.</div>
+<div class="call important"><strong>Важно</strong>Сам объект alias в <code>config.xml</code> не удаляется — остаётся пустым. Удаление автосозданных алиасов при увольнении пользователя это ручная операция.</div>
+
+<h3>T15 · Разрыв открытых соединений при отзыве (D30) <span class="opt">опционально</span></h3>
+<p>Снятие адреса из алиаса влияет только на <b>новые</b> соединения: pf проверяет правила на первом пакете, дальше живёт state.</p>
+<ol>
+  <li><span class="badge ui">UI</span> включить <code>Kill connections when access is revoked</code>, <b>Apply</b>.</li>
+  <li><span class="badge pc">PC</span> войти как <code>ivanov</code>, запустить <code>ping -t 8.8.8.8</code> — идёт.</li>
+  <li><span class="badge fw">FW</span> дождаться истечения или ускорить:</li>
+</ol>
+<pre><code>configctl adidentity expire
+pfctl -ss | grep 8.8.8.8</code></pre>
+<div class="call expect"><strong>Ожидание</strong>В ответе <code>ips_removed: 1</code> и <code>states_killed: 1</code>; состояний по <code>8.8.8.8</code> нет; пинг переходит в <code>Request timed out</code> и сам не восстанавливается. С выключенной галочкой пинг продолжал бы идти — живёт уже установленное состояние.</div>
+<div class="call note"><strong>Заметка</strong>Тест доказателен только при изолирующей паре правил из части 4. <code>states_killed</code> считает адреса, для которых вызывали kill, а не число снятых состояний. Смена групп у того же пользователя соединения не рвёт — адрес он не терял.</div>
+
+<h3>T16 · Политика ASCII-имён (D28) <span class="opt">опционально</span></h3>
+<ol>
+  <li><span class="badge dc">DC</span> создать группу с кириллическим именем и добавить в неё <code>ivanov</code>.</li>
+  <li><span class="badge ui">UI</span> добавить это имя в Monitored groups, <b>Apply</b>.</li>
+  <li><span class="badge pc">PC</span> релог.</li>
+</ol>
+<div class="call expect"><strong>Ожидание</strong>Alias не создаётся, в ответе плагина ошибка <code>must use English (ASCII) characters</code>. Сессия не теряется — отклонено именно имя алиаса. Вернуть стенд: убрать группу из Monitored groups.</div>
+
+<h3 id="autotest">Часть 6. Автотесты</h3>
+<p>Запускаются на машине разработки, стенд не нужен. Ожидание: всё зелёное (агент — 87 тестов, плагин — 62).</p>
+<pre><code>dotnet test agent\AdIdentity.Agent.sln
+python3 plugin\tests\test_session_store.py</code></pre>
+<p>После любой ручной правки Python на firewall обязательно:</p>
+<p><span class="badge fw">FW</span></p>
+<pre><code>python3 -m py_compile /usr/local/opnsense/scripts/adidentity/session_store.py</code></pre>
+<div class="call note"><strong>Заметка</strong>Синтаксическая ошибка в этом файле кладёт плагин целиком, а API при этом отвечает пустым телом без текста ошибки (так был найден D24).</div>
+
+<h3 id="where">Часть 7. Где что смотреть</h3>
+<table>
+  <tr><th>Что нужно увидеть</th><th>Где смотреть</th></tr>
+  <tr><td>Сессии глазами агента</td><td><span class="badge dc">DC</span> <code>GET /api/v1/sessions</code>, файл <code>%ProgramData%\AdIdentity\sessions.json</code></td></tr>
+  <tr><td>Память подтверждённых логинов (D23)</td><td><span class="badge dc">DC</span> <code>%ProgramData%\AdIdentity\login-memory.json</code></td></tr>
+  <tr><td>Лог агента</td><td>консольный запуск; под службой — журнал Application, источник <code>AdIdentity Agent</code></td></tr>
+  <tr><td>События на DC</td><td><span class="badge dc">DC</span> <code>Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4768}</code></td></tr>
+  <tr><td>Сессии глазами плагина</td><td><span class="badge fw">FW</span> <code>configctl adidentity session-list</code>, <code>/var/db/adidentity/sessions.json</code></td></tr>
+  <tr><td>Какие алиасы плагин считает своими</td><td><span class="badge fw">FW</span> <code>/var/db/adidentity/managed_aliases.json</code></td></tr>
+  <tr><td>Действующие настройки плагина</td><td><span class="badge fw">FW</span> <code>/usr/local/etc/adidentity.conf</code></td></tr>
+  <tr><td>Содержимое алиаса</td><td><span class="badge fw">FW</span> <code>pfctl -t &lt;Alias&gt; -T show</code> (не поле Content в GUI)</td></tr>
+  <tr><td>Открытые соединения адреса</td><td><span class="badge fw">FW</span> <code>pfctl -ss | grep &lt;ip&gt;</code></td></tr>
+  <tr><td>Вызовы плагина</td><td><span class="badge fw">FW</span> <code>/var/log/configd/latest.log</code></td></tr>
+  <tr><td>Задача истечения сессий</td><td><span class="badge fw">FW</span> <code>grep adidentity /var/cron/tabs/nobody</code></td></tr>
+  <tr><td>Хук восстановления при загрузке</td><td><span class="badge fw">FW</span> <code>/usr/local/etc/rc.syshook.d/start/99-adidentity</code></td></tr>
+</table>
+
+<h3 id="restore">Часть 8. Возврат стенда в боевое состояние</h3>
+<table>
+  <tr><th>Параметр</th><th>Тест</th><th>Боевое</th></tr>
+  <tr><td><code>SessionTtlSec</code> (агент)</td><td>180</td><td>28800</td></tr>
+  <tr><td>Session TTL (UI плагина)</td><td>180</td><td>28800</td></tr>
+  <tr><td><code>Accept4768</code> / <code>Accept4624</code></td><td>менялись в T8</td><td><code>true</code></td></tr>
+  <tr><td><code>PluginBaseUrl</code></td><td>менялся в T13</td><td><code>http://10.0.1.254</code></td></tr>
+  <tr><td>Enable user aliases</td><td>включалась в T14</td><td>по требованиям</td></tr>
+  <tr><td>Kill connections when access is revoked</td><td>включалась в T15</td><td>по требованиям</td></tr>
+</table>
+<p>Отдельно: удалить временное правило <code>Block LAN net → 8.8.8.8</code> из части 4, если оно не нужно постоянно, и перезапустить агент после правки <code>appsettings.json</code>.</p>
+
+<h3 id="checklist">Чек-лист результатов</h3>
+<p class="lead">Галочки сохраняются в этом браузере.</p>
+<table id="checks">
+  <tr><th></th><th>Тест</th><th>Что доказывает</th></tr>
+  <tr><td><input type="checkbox" data-k="t1"></td><td>T1</td><td>Агент жив и отвечает по API (критерий 3)</td></tr>
+  <tr><td><input type="checkbox" data-k="t2"></td><td>T2</td><td>Приём на плагине защищён токеном (критерий 2)</td></tr>
+  <tr><td><input type="checkbox" data-k="t3"></td><td>T3</td><td>Вход пользователя наполняет alias группы (критерий 4)</td></tr>
+  <tr><td><input type="checkbox" data-k="t4"></td><td>T4</td><td>Правило по alias влияет на трафик (критерий 5)</td></tr>
+  <tr><td><input type="checkbox" data-k="t5"></td><td>T5</td><td>Адрес отбирается у прежнего владельца (критерий 9, D1)</td></tr>
+  <tr><td><input type="checkbox" data-k="t6"></td><td>T6</td><td>Сессия истекает и адрес уходит (критерий 6, D5)</td></tr>
+  <tr><td><input type="checkbox" data-k="t7"></td><td>T7</td><td>Активность продлевает сессию (D22)</td></tr>
+  <tr><td><input type="checkbox" data-k="t8"></td><td>T8</td><td>Сессия восстанавливается по активности (D23)</td></tr>
+  <tr><td><input type="checkbox" data-k="t9"></td><td>T9</td><td>Перезапуск агента не теряет доступ (критерий 8, D8)</td></tr>
+  <tr><td><input type="checkbox" data-k="t10"></td><td>T10</td><td>Пустой агент не стирает живые алиасы (D8)</td></tr>
+  <tr><td><input type="checkbox" data-k="t11"></td><td>T11</td><td>Перезагрузка firewall восстанавливает таблицы сразу (критерий 7, D31)</td></tr>
+  <tr><td><input type="checkbox" data-k="t12"></td><td>T12</td><td>Расхождение pf-таблиц чинится само (D21)</td></tr>
+  <tr><td><input type="checkbox" data-k="t13"></td><td>T13</td><td>Недоступный плагин: повторы и догон (D6, D7)</td></tr>
+  <tr><td><input type="checkbox" data-k="t14"></td><td>T14</td><td>Персональные алиасы создаются и убираются (D29)</td></tr>
+  <tr><td><input type="checkbox" data-k="t15"></td><td>T15</td><td>Отзыв прав рвёт открытые соединения (D30)</td></tr>
+  <tr><td><input type="checkbox" data-k="t16"></td><td>T16</td><td>Неascii-имена отклоняются, а не схлопываются (D28)</td></tr>
+</table>
+
+<h3 id="limits">Что заведомо не проверяется</h3>
+<p>Это ограничения v1, а не дефекты прогона:</p>
+<ul>
+  <li>адрес сохраняет права до конца TTL, даже если за ним оказалось другое устройство без входа в домен (D26);</li>
+  <li>один пользователь удерживает один адрес: VPN и второе устройство вытеснят друг друга;</li>
+  <li>несколько контроллеров домена без отдельного коллектора;</li>
+  <li>путь HTTPS целиком (сертификат OPNsense и <code>netsh http add sslcert</code>) в лабе не прогонялся.</li>
+</ul>
+</section>
+
+</main>
+</div>
+
+<script>
+document.querySelectorAll("pre").forEach(function (pre) {
+  var btn = document.createElement("button");
+  btn.className = "copy";
+  btn.type = "button";
+  btn.textContent = "копировать";
+  btn.addEventListener("click", function () {
+    var text = pre.querySelector("code").innerText;
+    navigator.clipboard.writeText(text).then(function () {
+      btn.textContent = "скопировано";
+      setTimeout(function () { btn.textContent = "копировать"; }, 1200);
+    });
+  });
+  pre.appendChild(btn);
+});
+
+var KEY = "adidentity-checklist";
+var saved = {};
+try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) {}
+document.querySelectorAll("#checks input").forEach(function (box) {
+  box.checked = !!saved[box.dataset.k];
+  box.addEventListener("change", function () {
+    saved[box.dataset.k] = box.checked;
+    localStorage.setItem(KEY, JSON.stringify(saved));
+  });
+});
+</script>
+</body>
+</html>
