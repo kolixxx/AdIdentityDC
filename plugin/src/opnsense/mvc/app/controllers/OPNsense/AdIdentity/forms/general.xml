@@ -63,6 +63,6 @@
         <id>adidentity.general.session_ttl_sec</id>
         <label>Session TTL (seconds)</label>
         <type>text</type>
-        <help>Default 28800 (8 hours). Values below 10 hours can leave a user without access before Kerberos renews their ticket — see docs/configuration.adoc.</help>
+        <help>Default 43200 (12 hours). Values below 10 hours can leave a user without access before Kerberos renews their ticket — see docs/configuration.adoc. Applies only to sessions that arrive without expires_at; the agent's SessionTtlSec normally decides.</help>
     </field>
 </form>

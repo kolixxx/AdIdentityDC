@@ -345,7 +345,7 @@ cd /root/AdIdentityDC &amp;&amp; ./plugin/install.sh</code></pre>
   <tr><td>Auto-create aliases</td><td>вкл</td><td>иначе алиасы придётся заводить руками</td></tr>
   <tr><td>Require ASCII names</td><td>вкл</td><td></td></tr>
   <tr><td>Kill connections when access is revoked</td><td>выкл</td><td>включим в T15</td></tr>
-  <tr><td>Session TTL (seconds)</td><td><code>180</code></td><td>только на время теста, боевое — 28800</td></tr>
+  <tr><td>Session TTL (seconds)</td><td><code>180</code></td><td>только на время теста, боевое — 43200</td></tr>
 </table>
 <div class="call important"><strong>Важно</strong>
 Apply обязателен даже без изменений: он перегенерирует <code>/usr/local/etc/adidentity.conf</code> и регистрирует задачу истечения сессий в cron. Без неё просроченные адреса останутся в правилах.</div>
@@ -407,7 +407,7 @@ ls -l /usr/local/etc/rc.syshook.d/start/99-adidentity   # хук на месте
 <ul>
   <li><code>AllowInsecureTransport: true</code> — обязателен при <code>http://</code>, иначе агент намеренно не стартует и пишет <code>Refusing to push ... over plain HTTP</code>.</li>
   <li><code>ListenAddr: "+"</code> — иначе resync со стороны плагина не дойдёт. <code>0.0.0.0</code> не годится.</li>
-  <li><code>SessionTtlSec: 180</code> — <b>только на время теста</b>. Именно это значение решает, когда истечёт сессия (см. врезку в T6). Боевое — <code>28800</code>.</li>
+  <li><code>SessionTtlSec: 180</code> — <b>только на время теста</b>. Именно это значение решает, когда истечёт сессия (см. врезку в T6). Боевое — <code>43200</code>.</li>
 </ul>
 
 <h3>3.3 Первый запуск в консоли</h3>
@@ -651,8 +651,8 @@ python3 plugin\tests\test_session_store.py</code></pre>
 <h3 id="restore">Часть 8. Возврат стенда в боевое состояние</h3>
 <table>
   <tr><th>Параметр</th><th>Тест</th><th>Боевое</th></tr>
-  <tr><td><code>SessionTtlSec</code> (агент)</td><td>180</td><td>28800</td></tr>
-  <tr><td>Session TTL (UI плагина)</td><td>180</td><td>28800</td></tr>
+  <tr><td><code>SessionTtlSec</code> (агент)</td><td>180</td><td>43200</td></tr>
+  <tr><td>Session TTL (UI плагина)</td><td>180</td><td>43200</td></tr>
   <tr><td><code>Accept4768</code> / <code>Accept4624</code></td><td>менялись в T8</td><td><code>true</code></td></tr>
   <tr><td><code>PluginBaseUrl</code></td><td>менялся в T13</td><td><code>http://10.0.1.254</code></td></tr>
   <tr><td>Enable user aliases</td><td>включалась в T14</td><td>по требованиям</td></tr>

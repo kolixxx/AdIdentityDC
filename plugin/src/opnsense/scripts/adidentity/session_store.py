@@ -689,7 +689,7 @@ def normalize_incoming_session(item: dict[str, Any], conf: dict[str, str], ttl: 
 
 def upsert_session(payload: dict[str, Any]) -> dict[str, Any]:
     conf = load_conf()
-    ttl = int(conf.get("session_ttl_sec") or 28800)
+    ttl = int(conf.get("session_ttl_sec") or 43200)
     normalized = normalize_incoming_session(payload, conf, ttl)
     if normalized is None:
         return {"status": "failed", "message": "invalid session payload"}
@@ -723,7 +723,7 @@ def upsert_session(payload: dict[str, Any]) -> dict[str, Any]:
 
 def remove_session(payload: dict[str, Any]) -> dict[str, Any]:
     conf = load_conf()
-    ttl = int(conf.get("session_ttl_sec") or 28800)
+    ttl = int(conf.get("session_ttl_sec") or 43200)
     user = str(payload.get("user", "")).strip()
     domain = str(payload.get("domain", "")).strip()
     ip = str(payload.get("ip", "")).strip()
@@ -761,7 +761,7 @@ def remove_session(payload: dict[str, Any]) -> dict[str, Any]:
 def replace_all_sessions(payload: dict[str, Any]) -> dict[str, Any]:
     """Full snapshot replace used by Plugin <- Agent resync."""
     conf = load_conf()
-    ttl = int(conf.get("session_ttl_sec") or 28800)
+    ttl = int(conf.get("session_ttl_sec") or 43200)
     incoming = payload.get("sessions", [])
     if not isinstance(incoming, list):
         return {"status": "failed", "message": "sessions must be a list"}
@@ -804,7 +804,7 @@ def replace_all_sessions(payload: dict[str, Any]) -> dict[str, Any]:
 
 def list_sessions_cmd() -> dict[str, Any]:
     conf = load_conf()
-    ttl = int(conf.get("session_ttl_sec") or 28800)
+    ttl = int(conf.get("session_ttl_sec") or 43200)
     lock = acquire_lock()
     try:
         sessions = load_sessions()
@@ -829,7 +829,7 @@ def expire_cmd() -> dict[str, Any]:
     Intended to run from cron every 1-5 minutes.
     """
     conf = load_conf()
-    ttl = int(conf.get("session_ttl_sec") or 28800)
+    ttl = int(conf.get("session_ttl_sec") or 43200)
     lock = acquire_lock()
     try:
         sessions = load_sessions()
@@ -856,7 +856,7 @@ def reproject_cmd() -> dict[str, Any]:
     silently stop matching. Run this on service start.
     """
     conf = load_conf()
-    ttl = int(conf.get("session_ttl_sec") or 28800)
+    ttl = int(conf.get("session_ttl_sec") or 43200)
     lock = acquire_lock()
     try:
         sessions = load_sessions()

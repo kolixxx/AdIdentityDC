@@ -27,7 +27,7 @@ public sealed class AgentOptions
     /// attached with `netsh http add sslcert` — see docs/configuration.adoc.
     /// </summary>
     public bool ApiUseHttps { get; set; } = false;
-    public int SessionTtlSec { get; set; } = 28800;
+    public int SessionTtlSec { get; set; } = 43200;
 
     /// <summary>
     /// Extra attempts when a push to the plugin fails transiently (0 disables retry).

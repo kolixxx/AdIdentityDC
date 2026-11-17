@@ -54,7 +54,7 @@ cd /root/AdIdentityDC && git pull && ./plugin/install.sh
 . `Monitored groups` — по одной группе AD на строку (для начала одна);
 . `Enable user aliases` — оставить выключенным;
 . `Require ASCII names for aliases` — оставить включённым;
-. `Session TTL` — `28800` (8 часов);
+. `Session TTL` — `43200` (12 часов);
 . **Apply**.
 
 IMPORTANT: `Apply` обязателен даже если ничего не меняли после установки: он
@@ -115,7 +115,7 @@ New-NetFirewallRule -DisplayName "AdIdentity Agent API" -Direction Inbound `
     "ListenAddr": "+",
     "ListenPort": 8443,
     "ApiUseHttps": false,
-    "SessionTtlSec": 28800,
+    "SessionTtlSec": 43200,
     "MonitoredGroups": [ "Managers" ],
     "Ldap": {
       "Host": "dc01.internal.lab",

@@ -48,7 +48,7 @@
                 <Required>Y</Required>
             </kill_states_on_release>
             <session_ttl_sec type="IntegerField">
-                <Default>28800</Default>
+                <Default>43200</Default>
                 <MinimumValue>60</MinimumValue>
                 <Required>Y</Required>
             </session_ttl_sec>

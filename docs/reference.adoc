@@ -290,7 +290,7 @@ Base:: `/api/v1` на хосте Agent
 * `agent_base_url` (для health/resync)
 * `monitored_groups` (список, one-per-line)
 * `enable_user_aliases` (default off)
-* `session_ttl_sec` (default `28800` = 8h)
+* `session_ttl_sec` (default `43200` = 12h; applies only to sessions without `expires_at`)
 
 Опционально / advanced:
 
@@ -340,7 +340,7 @@ Base:: `/api/v1` на хосте Agent
 |4768
 
 |TTL
-|28800 sec
+|43200 sec (12h, above the 10h Kerberos TGT lifetime)
 
 |LDAP cache
 |600 sec (`Ldap.CacheSeconds`, agent-side)
