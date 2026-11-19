@@ -11,6 +11,11 @@
             <shared_token type="TextField">
                 <Required>N</Required>
             </shared_token>
+            <!-- Allowed client IPs for Bearer session API. Empty = unrestricted
+                 (lab). Production should list the DC / collector addresses. -->
+            <allowed_source_ips type="TextField">
+                <Required>N</Required>
+            </allowed_source_ips>
             <!-- TextField: lab uses http://IP:port; UrlField is stricter than we need -->
             <agent_base_url type="TextField">
                 <Required>N</Required>

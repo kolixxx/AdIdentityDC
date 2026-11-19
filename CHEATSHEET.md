@@ -117,6 +117,7 @@ Add-ADGroupMember -Identity "Managers" -Members "ivanov"
 | После ребута таблица пуста | Проверить хук `99-adidentity` и `reproject` в логе configd |
 | `groups=0` в логе агента | `BaseDn`, `MonitoredGroups` или членство в AD |
 | Агент не стартует, `Refusing to push` | `AllowInsecureTransport: true` при `http://` |
+| 401 с правильным токеном | IP DC нет в `Allowed source IPs` (или список битый) |
 | Пустой ответ API плагина | Синтаксис Python: `python3 -m py_compile ...` |
 
 ## Важное, о чём легко забыть

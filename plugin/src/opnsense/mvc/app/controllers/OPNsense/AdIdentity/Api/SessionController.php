@@ -39,7 +39,45 @@ class SessionController extends ApiControllerBase
         }
 
         $token = trim(substr($header, 7));
-        return hash_equals($expected, $token);
+        if (!hash_equals($expected, $token)) {
+            return false;
+        }
+
+        // Allowlist of agent/collector IPs. Empty means unrestricted (lab only).
+        return $this->sourceIpAllowed();
+    }
+
+    /**
+     * Restrict Bearer session API to configured source addresses.
+     * Empty allowlist keeps the lab usable; production must list the DC
+     * (or collector) so a stolen token cannot push rights from anywhere.
+     */
+    private function sourceIpAllowed(): bool
+    {
+        $raw = trim((string)$this->model()->general->allowed_source_ips);
+        if ($raw === '') {
+            return true;
+        }
+
+        $parts = preg_split('/[\r\n,;]+/', $raw) ?: [];
+        $allowed = [];
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if ($p !== '' && filter_var($p, FILTER_VALIDATE_IP)) {
+                $allowed[] = $p;
+            }
+        }
+        if ($allowed === []) {
+            // Misconfigured list with no valid IPs: fail closed for Bearer.
+            return false;
+        }
+
+        $client = (string)$this->request->getClientAddress(true);
+        if ($client === '') {
+            $client = (string)$this->request->getClientAddress(false);
+        }
+
+        return in_array($client, $allowed, true);
     }
 
     /**

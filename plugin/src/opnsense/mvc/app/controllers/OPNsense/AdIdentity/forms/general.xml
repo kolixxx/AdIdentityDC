@@ -12,6 +12,12 @@
         <help>Bearer token shared with the Windows Agent.</help>
     </field>
     <field>
+        <id>adidentity.general.allowed_source_ips</id>
+        <label>Allowed source IPs</label>
+        <type>textbox</type>
+        <help>One IPv4 address per line (or comma-separated). Bearer session upsert/remove/list is accepted only from these addresses. Leave empty only in the lab — anyone who knows the shared token could otherwise push arbitrary user/IP rights. Put the DC (or collector) address here for production.</help>
+    </field>
+    <field>
         <id>adidentity.general.agent_base_url</id>
         <label>Agent base URL</label>
         <type>text</type>
