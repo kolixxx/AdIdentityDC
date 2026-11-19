@@ -1520,40 +1520,33 @@ non-FSSO users share the same DHCP pool» — это D26 в формулиров
 
 ## 6. Зафиксированные параметры лаборатории
 
-**Стенд пересобран с нуля (2026-11-19):** чистый VLAN **131**, четыре
-машины в одной L2-сети:
+**Стенд пересобран с нуля (2026-11-19):** VLAN **131**, четыре машины.
 
-| Роль | Что есть сейчас | Пилот |
+| Роль | Хост / IP | Пилот |
 |---|---|---|
-| DC1 | есть | агент **только здесь** |
-| DC2 | есть | без агента; позже — дыра multi-DC / коллектор |
-| Клиент | одна Windows-03 (пока local/workgroup) | ввести в домен |
-| OPNsense | одна | плагин AdIdentity |
+| DC1 | `Interca` / `10.0.1.110` | агент **только здесь** |
+| DC2 | `10.0.1.99` (имя TBD) | без агента |
+| Клиент | Windows-03 (IP TBD) | ввести в домен |
+| OPNsense | `10.0.1.254` | плагин AdIdentity |
 
-Групп AD, тестовых учёток и AdIdentity на стенде **пока нет** — ставим
-с нуля. Адреса VLAN 131 ещё не зафиксированы (старые `10.0.1.x` ниже —
-только как образец прежнего стенда, пока не перепишешь).
-
-Пилот закрываем как **1 DC**. Второй DC не ставит агент, пока не зелёный
-T11/T14.
-
-Параметры ниже — **исходный** стенд с одним DC, образец до обновления IP.
-
-Домен `internal.lab`, NetBIOS `INTERNAL`.
+Домен **`training.rlab`**, NetBIOS **`TRAINING`**, BaseDn **`DC=training,DC=rlab`**.
+LDAP host для агента: **`Interca.training.rlab`** (или `10.0.1.110`).
+Групп/учёток AdIdentity пока нет — создаём с нуля. Пилот = 1 DC.
 
 | Компонент | Значение | Статус |
 |---|---|---|
-| DC | `10.0.1.99` | лицензия активирована; служба Agent Running |
-| LDAP Base DN | `DC=internal,DC=lab` | подтверждено `(Get-ADDomain).DistinguishedName` |
-| LDAP для пилота | FQDN DC `:389`, без SSL, bind пустой (Local System на DC) | подтверждено в логе `LDAP connected` |
-| **UTC DC ≈ UTC OPNsense** | обязательное условие для TTL | в лабе ловили сдвиг DC ≈ +7 ч (неверная TZ); см. `docs/troubleshooting.adoc` |
-| Таймзона лабы | **UTC+3** (`Russian Standard Time` на DC) | решено |
-| OPNsense | `10.0.1.254`, 25.1-amd64, LAN = шлюз, доступ root | подтверждено |
-| Web GUI | **HTTP, порт 80** (не 443) | подтверждено `Test-NetConnection … -Port 80` |
-| `PluginBaseUrl` | `http://10.0.1.254` | следствие предыдущего |
-| Порт API Agent | `8443`, `ListenAddr` = `+` | требует правила Windows Firewall и, возможно, URL ACL |
-| Клиент | `10.0.1.10`, DNS → `10.0.1.99` | в домене |
-| Тестовый пользователь | `INTERNAL\ivanov`, группы `Managers` и `Developers` (Global/Security) | подтверждено |
+| DC1 (агент) | `Interca` `10.0.1.110` | зафиксировано 2026-11-19 |
+| DC2 | `10.0.1.99` | без агента в пилоте |
+| LDAP Base DN | `DC=training,DC=rlab` | с DC1 |
+| LDAP host | `Interca.training.rlab:389`, без SSL, bind пустой | Local System на DC |
+| **UTC DC ≈ UTC OPNsense** | обязательно для TTL | проверить перед прогоном |
+| Таймзона лабы | **UTC+3** (`Russian Standard Time` на DC) | как раньше |
+| OPNsense | `10.0.1.254`, LAN = шлюз | подтверждено |
+| Web GUI | **HTTP, порт 80** | как раньше |
+| `PluginBaseUrl` | `http://10.0.1.254` | следствие |
+| Порт API Agent | `8443`, `ListenAddr` = `+` | firewall: только с `.254` |
+| Клиент | Windows-03, IP TBD, DNS → `10.0.1.110` | ввести в домен |
+| Тестовый пользователь | `TRAINING\ivanov` → группа `Managers` | ещё создать |
 | Shared token | задаётся пользователем локально | **в репозиторий и в чат не попадает** |
 | Репозиторий | `https://github.com/kolixxx/AdIdentityDC` | создан, ещё не запушен |
 
