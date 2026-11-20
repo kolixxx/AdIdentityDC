@@ -316,6 +316,9 @@ Base:: `/api/v1` на хосте Agent
 
 * `PluginBaseUrl` (например `http://10.0.1.254` — базовый URL, путь
   `api/adidentity/session/upsert` агент добавляет сам)
+* `Role` — `Standalone` (default, пилот), `Sensor` (DC → коллектор),
+  `Collector` (ingest + LDAP + push + resync API). См. `collector.adoc`
+* `CollectorBaseUrl` — только для `Role=Sensor` (база коллектора)
 * `SharedToken`
 * `AllowInsecureTransport` (default `false`) — без него агент не стартует, если
   `PluginBaseUrl` не `https://` и хост не loopback (D9)

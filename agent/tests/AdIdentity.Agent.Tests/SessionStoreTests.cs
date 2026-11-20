@@ -134,6 +134,35 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Single(store.GetAll());
     }
 
+    [Fact]
+    public void An_older_event_ts_does_not_overwrite_a_newer_session()
+    {
+        // multi-dc.adoc: delivery order must not beat event time.
+        var store = NewStore();
+        var t0 = DateTimeOffset.Parse("2026-11-20T12:00:00Z");
+        Assert.NotNull(store.Upsert(Session("ivanov", "10.0.1.10", "Managers", at: t0.AddSeconds(10), dc: "dc1")));
+
+        Assert.Null(store.Upsert(Session("ivanov", "10.0.1.20", "Managers", at: t0, dc: "dc2")));
+
+        var held = Assert.Single(store.GetAll());
+        Assert.Equal("10.0.1.10", held.Ip);
+        Assert.Equal("dc1", held.Dc);
+    }
+
+    [Fact]
+    public void Equal_ts_prefers_the_lexicographically_greater_dc()
+    {
+        var store = NewStore();
+        var t0 = DateTimeOffset.Parse("2026-11-20T12:00:00Z");
+        Assert.NotNull(store.Upsert(Session("ivanov", "10.0.1.10", "Managers", at: t0, dc: "dc-a")));
+
+        Assert.NotNull(store.Upsert(Session("ivanov", "10.0.1.20", "Managers", at: t0, dc: "dc-b")));
+
+        var held = Assert.Single(store.GetAll());
+        Assert.Equal("10.0.1.20", held.Ip);
+        Assert.Equal("dc-b", held.Dc);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_dir))
@@ -147,7 +176,9 @@ public sealed class SessionStoreTests : IDisposable
         string ip,
         string group,
         TimeSpan? ttl = null,
-        bool withoutExpiry = false)
+        bool withoutExpiry = false,
+        DateTimeOffset? at = null,
+        string? dc = null)
     {
         DateTimeOffset? expires = withoutExpiry
             ? null
@@ -160,8 +191,8 @@ public sealed class SessionStoreTests : IDisposable
             Ip = ip,
             Groups = new[] { group },
             Event = "login",
-            Ts = DateTimeOffset.UtcNow,
-            Dc = "DC01",
+            Ts = at ?? DateTimeOffset.UtcNow,
+            Dc = dc ?? "DC01",
             ExpiresAt = expires
         };
     }

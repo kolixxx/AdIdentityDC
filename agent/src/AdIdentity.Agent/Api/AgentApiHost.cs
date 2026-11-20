@@ -1,8 +1,10 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AdIdentity.Agent.Abstractions;
 using AdIdentity.Agent.Models;
+using AdIdentity.Agent.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,19 +12,25 @@ using Microsoft.Extensions.Options;
 namespace AdIdentity.Agent.Api;
 
 /// <summary>
-/// Minimal HTTP listener for Agent API: /api/v1/health and /api/v1/sessions.
+/// Agent/Collector API: health, sessions (resync), and collector ingest.
 /// </summary>
 public sealed class AgentApiHost : BackgroundService
 {
     private readonly ISessionStore _store;
     private readonly AgentOptions _options;
+    private readonly IngestEventBus? _ingest;
     private readonly ILogger<AgentApiHost> _logger;
     private HttpListener? _listener;
 
-    public AgentApiHost(ISessionStore store, IOptions<AgentOptions> options, ILogger<AgentApiHost> logger)
+    public AgentApiHost(
+        ISessionStore store,
+        IOptions<AgentOptions> options,
+        ILogger<AgentApiHost> logger,
+        IngestEventBus? ingest = null)
     {
         _store = store;
         _options = options.Value;
+        _ingest = ingest;
         _logger = logger;
     }
 
@@ -86,7 +94,8 @@ public sealed class AgentApiHost : BackgroundService
                 await WriteJsonAsync(context.Response, new
                 {
                     status = "ok",
-                    version = "0.1.0",
+                    version = "0.2.0",
+                    role = _options.Role.ToString(),
                     sessions = _store.Count
                 }, cancellationToken);
                 return;
@@ -98,6 +107,23 @@ public sealed class AgentApiHost : BackgroundService
                 // its upsert parser never drift apart.
                 var sessions = _store.GetAll().Select(s => s.ToContractPayload());
                 await WriteJsonAsync(context.Response, new { sessions }, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "POST" &&
+                path.Equals("/api/v1/ingest/event", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_ingest is null || _options.Role != AgentRole.Collector)
+                {
+                    context.Response.StatusCode = 404;
+                    await WriteJsonAsync(
+                        context.Response,
+                        new { status = "failed", message = "ingest only on Role=Collector" },
+                        cancellationToken);
+                    return;
+                }
+
+                await HandleIngestAsync(context, cancellationToken);
                 return;
             }
 
@@ -121,6 +147,74 @@ public sealed class AgentApiHost : BackgroundService
         {
             context.Response.OutputStream.Close();
         }
+    }
+
+    private async Task HandleIngestAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
+        var body = await reader.ReadToEndAsync(cancellationToken);
+        IngestEventDto? dto;
+        try
+        {
+            dto = JsonSerializer.Deserialize<IngestEventDto>(body, IngestJsonOptions);
+        }
+        catch (JsonException)
+        {
+            context.Response.StatusCode = 400;
+            await WriteJsonAsync(context.Response, new { status = "failed", message = "invalid json" }, cancellationToken);
+            return;
+        }
+
+        if (dto is null ||
+            string.IsNullOrWhiteSpace(dto.User) ||
+            string.IsNullOrWhiteSpace(dto.Domain) ||
+            string.IsNullOrWhiteSpace(dto.Ip) ||
+            dto.EventId is null ||
+            string.IsNullOrWhiteSpace(dto.Ts) ||
+            !IsoUtc.TryParse(dto.Ts, out var ts))
+        {
+            context.Response.StatusCode = 400;
+            await WriteJsonAsync(context.Response, new { status = "failed", message = "invalid event" }, cancellationToken);
+            return;
+        }
+
+        var raw = new RawLogonEvent
+        {
+            User = dto.User.Trim(),
+            Domain = dto.Domain.Trim(),
+            Ip = dto.Ip.Trim(),
+            EventId = dto.EventId.Value,
+            LogonType = dto.LogonType,
+            Ts = ts,
+            Dc = string.IsNullOrWhiteSpace(dto.Dc) ? null : dto.Dc.Trim()
+        };
+
+        if (!_ingest!.TryPublish(raw))
+        {
+            context.Response.StatusCode = 503;
+            await WriteJsonAsync(context.Response, new { status = "failed", message = "ingest busy" }, cancellationToken);
+            return;
+        }
+
+        context.Response.StatusCode = 200;
+        await WriteJsonAsync(context.Response, new { status = "ok" }, cancellationToken);
+    }
+
+    private static readonly JsonSerializerOptions IngestJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString
+    };
+
+    private sealed class IngestEventDto
+    {
+        public string? User { get; set; }
+        public string? Domain { get; set; }
+        public string? Ip { get; set; }
+        public int? EventId { get; set; }
+        public int? LogonType { get; set; }
+        public string? Ts { get; set; }
+        public string? Dc { get; set; }
     }
 
     private bool Authorize(HttpListenerRequest request)

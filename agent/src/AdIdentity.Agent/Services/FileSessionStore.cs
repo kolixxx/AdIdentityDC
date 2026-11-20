@@ -81,8 +81,29 @@ public sealed class FileSessionStore : ISessionStore
         lock (_gate)
         {
             Prune();
-            EvictIp(session.Ip, MakeKey(session.User, session.Domain));
-            _sessions[MakeKey(session.User, session.Domain)] = session;
+            var key = MakeKey(session.User, session.Domain);
+
+            // multi-dc.adoc: winner is the greater event ts, not delivery order.
+            if (_sessions.TryGetValue(key, out var existing))
+            {
+                if (existing.Ts > session.Ts)
+                {
+                    return null;
+                }
+
+                if (existing.Ts == session.Ts)
+                {
+                    var keepDc = existing.Dc ?? "";
+                    var newDc = session.Dc ?? "";
+                    if (string.CompareOrdinal(keepDc, newDc) >= 0)
+                    {
+                        return null;
+                    }
+                }
+            }
+
+            EvictIp(session.Ip, key);
+            _sessions[key] = session;
             SaveUnlocked();
             return session;
         }

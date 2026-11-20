@@ -1,10 +1,37 @@
 namespace AdIdentity.Agent.Models;
 
+/// <summary>
+/// Process role for the same published binary. See docs/collector.adoc.
+/// </summary>
+public enum AgentRole
+{
+    /// <summary>Pilot: local Security log → LDAP → OPNsense.</summary>
+    Standalone = 0,
+
+    /// <summary>DC node: forward raw events to a Collector; no LDAP/push.</summary>
+    Sensor = 1,
+
+    /// <summary>Central store: ingest from sensors → LDAP → OPNsense; resync API.</summary>
+    Collector = 2
+}
+
 public sealed class AgentOptions
 {
     public const string SectionName = "AdIdentity";
 
+    /// <summary>
+    /// Standalone (default), Sensor (on each DC), or Collector (AdCollector host).
+    /// </summary>
+    public AgentRole Role { get; set; } = AgentRole.Standalone;
+
     public string PluginBaseUrl { get; set; } = "https://opnsense.local";
+
+    /// <summary>
+    /// Sensor only: base URL of the Collector ingest API
+    /// (e.g. http://10.0.1.100:8443). Ignored in Standalone/Collector.
+    /// </summary>
+    public string CollectorBaseUrl { get; set; } = "";
+
     public string SharedToken { get; set; } = "";
 
     /// <summary>

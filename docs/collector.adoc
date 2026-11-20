@@ -1,0 +1,93 @@
+= Коллектор и сенсоры (multi-DC / v2)
+:toc: left
+:toclevels: 2
+
+Спека по фактам `docs/multi-dc.adoc` и реализации в `agent/`.
+Код коллектора — **тот же бинарь**, что и пилотный агент; режим задаётся
+`AdIdentity:Role`.
+
+== Роли
+
+[cols="1,3"]
+|===
+|Role |Поведение
+
+|`Standalone` (default)
+|Как пилот: Security Log → LDAP → store → push на OPNsense; API
+`/api/v1/health` и `/api/v1/sessions` для resync. Один DC.
+
+|`Sensor`
+|Только Security Log на DC. Каждое принятое событие `POST` на коллектор
+`/api/v1/ingest/event`. Без LDAP, без локального store, без push на
+firewall, без Agent API.
+
+|`Collector`
+|Не читает локальный Security Log. Принимает ingest от сенсоров, LDAP,
+единый store, push на OPNsense, API health/sessions для resync плагина.
+Дедуп по `ts` (и tie-break по `dc`) при upsert.
+|===
+
+== Лаборатория training.rlab
+
+[cols="1,2"]
+|===
+|Узел |Назначение
+
+|DC1 `Interca` `10.0.1.110`
+|Sensor
+
+|DC2 `10.0.1.99`
+|Sensor
+
+|`AdCollector` `10.0.1.100`
+|Collector → OPNsense
+
+|OPNsense `10.0.1.254`
+|Плагин: `Agent base URL` = `http://10.0.1.100:8443`,
+`Allowed source IPs` = `10.0.1.100` (+ `127.0.0.1` для отладки)
+|===
+
+Общий `SharedToken` на сенсорах, коллекторе и плагине.
+
+== Контракт ingest
+
+`POST /api/v1/ingest/event`  
+Auth: `Authorization: Bearer <SharedToken>` (как Agent API)
+
+Тело JSON (поля `RawLogonEvent`):
+
+[source,json]
+----
+{
+  "user": "ivanov",
+  "domain": "TRAINING",
+  "ip": "10.0.1.10",
+  "eventId": 4768,
+  "logonType": null,
+  "ts": "2026-11-20T16:54:07.152296Z",
+  "dc": "Interca.training.rlab"
+}
+----
+
+Ответ: `{ "status": "ok" }` или `401` / `400`.
+
+== Дедуп (из multi-dc.adoc)
+
+* Ключ сессии: `domain\user` (как D4).
+* Поздний событие с **меньшим** `ts` не перезаписывает store и не пушится.
+* Одинаковый `ts`, разный IP/`dc`: побеждает лексикографически больший `dc`.
+* D1 (вытеснение по IP) на коллекторе сохраняется для принятых upsert.
+
+== Что не в этом этапе
+
+* WEF / `ForwardedEvents`
+* WinRM-живость
+* Несколько IP на одного пользователя
+* DHCP-отзыв
+
+== Критерии готовности (повтор multi-dc.adoc)
+
+. Логин через DC1 или DC2 → IP в нужном alias на OPNsense.
+. Шум с двух DC не плодит две сессии одного user.
+. Resync плагина с URL коллектора восстанавливает полный снимок.
+. Падение одного DC не мешает событиям с живого DC.

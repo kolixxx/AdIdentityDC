@@ -10,4 +10,19 @@ internal static class IsoUtc
 
     public static string Format(DateTimeOffset value) =>
         value.UtcDateTime.ToString(Pattern);
+
+    public static bool TryParse(string? value, out DateTimeOffset result)
+    {
+        result = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return DateTimeOffset.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out result);
+    }
 }

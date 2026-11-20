@@ -88,14 +88,26 @@ public sealed class SessionPipeline
         };
 
         _loginMemory.Remember(user, domain, raw.Ip, raw.Ts); // [D23 login-memory]
-        _store.Upsert(session);
-        await _plugin.UpsertAsync(session, cancellationToken);
+        var stored = _store.Upsert(session);
+        if (stored is null)
+        {
+            _logger.LogInformation(
+                "Ignored stale login for {Domain}\\{User} {Ip} ts={Ts} dc={Dc}",
+                session.Domain,
+                session.User,
+                session.Ip,
+                session.Ts,
+                session.Dc);
+            return;
+        }
+
+        await _plugin.UpsertAsync(stored, cancellationToken);
         _logger.LogInformation(
             "Session upserted {Domain}\\{User} {Ip} groups={GroupCount}",
-            session.Domain,
-            session.User,
-            session.Ip,
-            session.Groups.Count);
+            stored.Domain,
+            stored.User,
+            stored.Ip,
+            stored.Groups.Count);
     }
 
     private async Task HandleActivityRefreshAsync(
@@ -160,14 +172,19 @@ public sealed class SessionPipeline
             ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(_options.SessionTtlSec)
         };
 
-        _store.Upsert(refreshed);
-        await _plugin.UpsertAsync(refreshed, cancellationToken);
+        var stored = _store.Upsert(refreshed);
+        if (stored is null)
+        {
+            return;
+        }
+
+        await _plugin.UpsertAsync(stored, cancellationToken);
         _logger.LogInformation(
             "Session refreshed from 4769 {Domain}\\{User} {Ip}; expires {ExpiresAt}",
-            refreshed.Domain,
-            refreshed.User,
-            refreshed.Ip,
-            refreshed.ExpiresAt);
+            stored.Domain,
+            stored.User,
+            stored.Ip,
+            stored.ExpiresAt);
     }
 
     /// <summary>
@@ -196,14 +213,19 @@ public sealed class SessionPipeline
             ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(_options.SessionTtlSec)
         };
 
-        _store.Upsert(session);
-        await _plugin.UpsertAsync(session, cancellationToken);
+        var stored = _store.Upsert(session);
+        if (stored is null)
+        {
+            return;
+        }
+
+        await _plugin.UpsertAsync(stored, cancellationToken);
         _logger.LogInformation(
             "Session restored from 4769 for remembered logon {Domain}\\{User} {Ip} groups={GroupCount}",
-            session.Domain,
-            session.User,
-            session.Ip,
-            session.Groups.Count);
+            stored.Domain,
+            stored.User,
+            stored.Ip,
+            stored.Groups.Count);
     }
 
     private async Task<IReadOnlyList<string>> ResolveMonitoredGroupsAsync(
