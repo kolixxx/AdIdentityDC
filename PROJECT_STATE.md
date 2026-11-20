@@ -1524,14 +1524,14 @@ non-FSSO users share the same DHCP pool» — это D26 в формулиров
 
 | Роль | Хост / IP | Пилот |
 |---|---|---|
-| DC1 | `Interca` / `10.0.1.110` | агент **только здесь** |
-| DC2 | `10.0.1.99` (имя TBD) | без агента |
-| Клиент | Windows-03 (IP TBD) | ввести в домен |
+| DC1 | `Interca` / `10.0.1.110` | сенсор/агент (пилот: полный агент) |
+| DC2 | `10.0.1.99` (имя TBD) | второй сенсор после коллектора |
+| Клиент | Win-03 / `10.0.1.10` | в домене, `TRAINING\ivanov` |
+| Коллектор | `WinServer` / `10.0.1.100` | отдельный Win Server; пока сырой |
 | OPNsense | `10.0.1.254` | плагин AdIdentity |
 
 Домен **`training.rlab`**, NetBIOS **`TRAINING`**, BaseDn **`DC=training,DC=rlab`**.
-LDAP host для агента: **`Interca.training.rlab`** (или `10.0.1.110`).
-Групп/учёток AdIdentity пока нет — создаём с нуля. Пилот = 1 DC.
+LDAP host (пилот): **`Interca.training.rlab`**. Пилот 1 DC зелёный; цель — v2.
 
 | Компонент | Значение | Статус |
 |---|---|---|
