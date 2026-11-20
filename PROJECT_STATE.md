@@ -1527,7 +1527,7 @@ non-FSSO users share the same DHCP pool» — это D26 в формулиров
 | DC1 | `Interca` / `10.0.1.110` | сенсор/агент (пилот: полный агент) |
 | DC2 | `10.0.1.99` (имя TBD) | второй сенсор после коллектора |
 | Клиент | Win-03 / `10.0.1.10` | в домене, `TRAINING\ivanov` |
-| Коллектор | `WinServer` / `10.0.1.100` | отдельный Win Server; пока сырой |
+| Коллектор | `AdCollector` / `10.0.1.100` | в домене `training.rlab` (после sysprep; CA снят) |
 | OPNsense | `10.0.1.254` | плагин AdIdentity |
 
 Домен **`training.rlab`**, NetBIOS **`TRAINING`**, BaseDn **`DC=training,DC=rlab`**.
