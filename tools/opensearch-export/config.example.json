@@ -1,0 +1,10 @@
+{
+  "CollectorUrl": "http://127.0.0.1:8443",
+  "CollectorToken": "replace-with-shared-token",
+  "OpenSearchUrl": "https://opensearch.example.local:9200",
+  "OpenSearchUser": "adidentity-writer",
+  "OpenSearchPassword": "replace-with-password",
+  "IndexName": "adidentity-sessions",
+  "SkipCertificateCheck": false,
+  "PollSeconds": 60
+}
