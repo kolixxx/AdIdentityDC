@@ -53,16 +53,37 @@ public sealed class LoginPipelineTests : IDisposable
     }
 
     [Fact]
-    public async Task A_user_in_no_monitored_group_still_becomes_a_session_with_no_groups()
+    public async Task A_user_in_no_monitored_group_is_ignored_when_the_address_is_free()
     {
-        // The plugin needs to know the address is claimed, otherwise a stale
-        // entry from a previous holder could survive in some alias.
+        // Administrator on the collector host, etc. — no firewall value.
         var h = NewHarness(
             options => options.MonitoredGroups.Add("Managers"),
             new FakeGroupResolver("Domain Users"));
 
+        await h.RunAsync(Logon("sidorov", "INTERNAL", "10.0.1.100"));
+
+        Assert.Empty(h.Store.GetAll());
+        Assert.Empty(h.Plugin.Upserts);
+    }
+
+    [Fact]
+    public async Task A_user_in_no_monitored_group_still_claims_an_occupied_address()
+    {
+        // D1 / criterion 9: otherwise the previous holder stays in Managers.
+        var h = NewHarness(
+            options => options.MonitoredGroups.Add("Managers"),
+            new PerUserGroupResolver(
+                ("ivanov", new[] { "Managers" }),
+                ("sidorov", new[] { "Domain Users" })));
+
+        await h.RunAsync(Logon("ivanov", "INTERNAL", "10.0.1.10"));
+        h.Plugin.Upserts.Clear();
+
         await h.RunAsync(Logon("sidorov", "INTERNAL", "10.0.1.10"));
 
+        var session = Assert.Single(h.Store.GetAll());
+        Assert.Equal("sidorov", session.User);
+        Assert.Empty(session.Groups);
         Assert.Empty(Assert.Single(h.Plugin.Upserts).Groups);
     }
 
@@ -231,6 +252,24 @@ public sealed class LoginPipelineTests : IDisposable
 
             return Task.FromResult<IReadOnlyList<string>>(new[] { "Managers" });
         }
+    }
+
+    private sealed class PerUserGroupResolver : IGroupResolver
+    {
+        private readonly Dictionary<string, string[]> _byUser;
+
+        public PerUserGroupResolver(params (string user, string[] groups)[] map) =>
+            _byUser = map.ToDictionary(
+                x => x.user,
+                x => x.groups,
+                StringComparer.OrdinalIgnoreCase);
+
+        public Task<IReadOnlyList<string>> ResolveGroupsAsync(
+            string user,
+            string domain,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>(
+                _byUser.TryGetValue(user, out var groups) ? groups : Array.Empty<string>());
     }
 
     private sealed class Harness

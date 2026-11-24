@@ -3,7 +3,8 @@
 Всё самое частое на одной странице. Подробности: `docs/troubleshooting.adoc`,
 полный прогон стенда: `docs/test-plan.adoc`.
 
-Лаборатория: DC `10.0.1.99`, OPNsense `10.0.1.254`, клиент `10.0.1.10`.
+Лаборатория v2: Collector `10.0.1.100`, DC1 `10.0.1.110`, DC2 `10.0.1.99`,
+OPNsense `10.0.1.254`, клиент `10.0.1.10`. Сдача multi-DC: `docs/collector.adoc`.
 
 ## Плагин (OPNsense, SSH под root)
 
@@ -58,8 +59,13 @@ curl -s -o /dev/null -w '%{http_code}\n' http://10.0.1.254/api/adidentity/sessio
 Get-Service AdIdentityAgent
 Restart-Service AdIdentityAgent
 Stop-Service AdIdentityAgent
-cd C:\AdIdentity; .\AdIdentity.Agent.Service.exe    # запуск в консоли: видно каждое событие
+# Role (Collector/Sensor/Standalone) — только в C:\AdIdentity\appsettings.json
+# Установка службы: agent\scripts\Install-AdIdentityService.ps1 -Start
+cd C:\AdIdentity; .\AdIdentity.Agent.Service.exe    # консоль: видно каждое событие
 ```
+
+Смена shared token (везде одна строка → Apply в UI → Restart-Service на всех
+хостах). Не коммитить реальный токен; в publish/examples только placeholder.
 
 ```powershell
 $t = "<ТОКЕН>"

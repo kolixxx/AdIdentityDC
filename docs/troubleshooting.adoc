@@ -483,6 +483,36 @@ pfctl -t Managers -T show
 Повторных попыток при 401 нет намеренно (D25): ошибка настройки не лечится
 retry, а лишние запросы только шумят в журнале.
 
+== Проблема: `You must install or update .NET` / `No frameworks were found`
+
+Сборка должна быть **self-contained** (`-r win-x64 --self-contained true`).
+Framework-dependent publish требует .NET 8 Runtime на хосте; если в
+`C:\AdIdentity` остался `hostfxr.dll` без frameworks — ошибка указывает
+`.NET location: C:\AdIdentity\`.
+
+Лечение: заново скопировать полный `publish/agent` (self-contained), не
+затирая только `appsettings.json`. Либо поставить
+https://dotnet.microsoft.com/download/dotnet/8.0 Runtime (x64).
+
+Не использовать каталог вроде `publish/agent-sensor` — там нет полного
+бинаря, только обрывок конфига.
+
+== Проблема: `New-Service` ок, `Start-Service` падает (`CouldNotStartService`)
+
+Частые причины:
+
+. Старый бинарь без ContentRoot → `appsettings` не читается.
+. Служба зарегистрирована как `AdIdentityCollector`/`AdIdentitySensor`, а
+  процесс ждёт другое имя SCM.
+
+Сейчас: ContentRoot + явный `appsettings.json` рядом с exe; **одно** имя
+службы `AdIdentityAgent` на всех ролях. Удалить legacy-службы, поставить
+свежий `publish/agent` (не затирая `appsettings.json`), зарегистрировать
+`AdIdentityAgent`.
+
+Проверка: `(Get-Item C:\AdIdentity\AdIdentity.Agent.Service.exe).LastWriteTime`
+и консольный запуск `.\AdIdentity.Agent.Service.exe` из `C:\AdIdentity`.
+
 == Проблема: служба агента не стартует после обновления, в логе «Refusing to push»
 
 Ожидаемое поведение D9, а не поломка. Агент отказывается отправлять токен

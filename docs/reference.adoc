@@ -322,6 +322,8 @@ Base:: `/api/v1` на хосте Agent
 * `SharedToken`
 * `AllowInsecureTransport` (default `false`) — без него агент не стартует, если
   `PluginBaseUrl` не `https://` и хост не loopback (D9)
+* `PluginIgnoreSslErrors` (default `false`) — не проверять сертификат
+  `https://` PluginBaseUrl (самоподписанный сертификат GUI OPNsense)
 * `ListenAddr` (default `+`) / `ListenPort` (default `8443`)
 * `ApiUseHttps` (default `false`) — требует сертификата, привязанного к порту
   через `netsh http add sslcert`

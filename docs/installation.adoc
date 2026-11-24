@@ -140,10 +140,13 @@ self-contained сборка и регистрируется службой вр�
 
 Порядок:
 
-. Собрать агента на машине с .NET SDK (`dotnet publish --self-contained`).
-  На DC ставить .NET не нужно, исходники репозитория туда не копируются.
-. Скопировать **результат сборки** на DC, `appsettings.json` лежит рядом с `.exe`.
-. Заполнить конфигурацию: `PluginBaseUrl`, `SharedToken`,
+. Собрать агента на машине с .NET SDK
+  (`dotnet publish -r win-x64 --self-contained true`). На DC ставить .NET не
+  нужно, исходники репозитория туда не копируются. Multi-DC: см.
+  `collector.adoc`.
+. Скопировать **результат сборки** на хост, рабочий `appsettings.json` рядом
+  с `.exe` не затирать шаблоном из publish.
+. Заполнить конфигурацию: `PluginBaseUrl` / `CollectorBaseUrl`, `SharedToken`,
   `AllowInsecureTransport` (если плагин по `http://`), `ListenAddr`,
   LDAP-параметры, `SessionTtlSec`, `MonitoredGroups`, фильтр событий.
 . Запустить сначала в консоли и убедиться по логу, что поднялся API и

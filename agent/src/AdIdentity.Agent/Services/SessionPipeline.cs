@@ -74,6 +74,15 @@ public sealed class SessionPipeline
         }
 
         var groups = await ResolveMonitoredGroupsAsync(user, domain, cancellationToken);
+        if (ShouldSkipEmptyMonitoredSession(user, domain, raw.Ip, groups))
+        {
+            _logger.LogInformation(
+                "Ignored login for {Domain}\\{User} {Ip}: not in MonitoredGroups",
+                domain,
+                user,
+                raw.Ip);
+            return;
+        }
 
         var session = new Session
         {
@@ -152,6 +161,13 @@ public sealed class SessionPipeline
             return;
         }
 
+        // Empty-group noise (e.g. Administrator on the collector host) must not
+        // keep refreshing TTL; let prune expire it.
+        if (_options.MonitoredGroups.Count > 0 && existing.Groups.Count == 0)
+        {
+            return;
+        }
+
         var minimumInterval = TimeSpan.FromSeconds(
             Math.Max(0, _options.ActivityRefreshMinIntervalSec));
         if (minimumInterval > TimeSpan.Zero &&
@@ -200,6 +216,10 @@ public sealed class SessionPipeline
         CancellationToken cancellationToken)
     {
         var groups = await ResolveMonitoredGroupsAsync(user, domain, cancellationToken);
+        if (ShouldSkipEmptyMonitoredSession(user, domain, raw.Ip, groups))
+        {
+            return;
+        }
 
         var session = new Session
         {
@@ -226,6 +246,28 @@ public sealed class SessionPipeline
             stored.User,
             stored.Ip,
             stored.Groups.Count);
+    }
+
+    /// <summary>
+    /// When MonitoredGroups is set, skip users who match none — except when their
+    /// IP is already held by someone else (D1 / criterion 9: claim the address so
+    /// the previous holder leaves group aliases).
+    /// </summary>
+    private bool ShouldSkipEmptyMonitoredSession(
+        string user,
+        string domain,
+        string ip,
+        IReadOnlyList<string> groups)
+    {
+        if (_options.MonitoredGroups.Count == 0 || groups.Count > 0)
+        {
+            return false;
+        }
+
+        return !_store.GetAll().Any(s =>
+            string.Equals(s.Ip, ip, StringComparison.OrdinalIgnoreCase) &&
+            !(string.Equals(s.User, user, StringComparison.OrdinalIgnoreCase) &&
+              string.Equals(s.Domain, domain, StringComparison.OrdinalIgnoreCase)));
     }
 
     private async Task<IReadOnlyList<string>> ResolveMonitoredGroupsAsync(

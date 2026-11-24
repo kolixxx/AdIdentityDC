@@ -1525,7 +1525,7 @@ non-FSSO users share the same DHCP pool» — это D26 в формулиров
 | Роль | Хост / IP | Пилот |
 |---|---|---|
 | DC1 | `Interca` / `10.0.1.110` | сенсор/агент (пилот: полный агент) |
-| DC2 | `10.0.1.99` (имя TBD) | второй сенсор после коллектора |
+| DC2 | `WIN-DR0HHDQLS77` / `10.0.1.99` | сенсор (Role=Sensor) → коллектор |
 | Клиент | Win-03 / `10.0.1.10` | в домене, `TRAINING\ivanov` |
 | Коллектор | `AdCollector` / `10.0.1.100` | в домене `training.rlab` (после sysprep; CA снят) |
 | OPNsense | `10.0.1.254` | плагин AdIdentity |
@@ -1536,7 +1536,7 @@ LDAP host (пилот): **`Interca.training.rlab`**. Пилот 1 DC зелён�
 | Компонент | Значение | Статус |
 |---|---|---|
 | DC1 (агент) | `Interca` `10.0.1.110` | зафиксировано 2026-11-19 |
-| DC2 | `10.0.1.99` | без агента в пилоте |
+| DC2 | `WIN-DR0HHDQLS77` `10.0.1.99` | Sensor → `.100:8443` (живой 4768 ivanov 2026-11-20) |
 | LDAP Base DN | `DC=training,DC=rlab` | с DC1 |
 | LDAP host | `Interca.training.rlab:389`, без SSL, bind пустой | Local System на DC |
 | **UTC DC ≈ UTC OPNsense** | обязательно для TTL | проверить перед прогоном |
@@ -1614,11 +1614,41 @@ T11 reboot. T14 (user aliases) — завтра.
       (`Role=Standalone|Sensor|Collector`), ingest
       `POST /api/v1/ingest/event`, дедуп store по `ts`/`dc`.
       Автотесты: 95 green (2026-11-20).
-4. [ ] Выкат на стенд: Collector на AdCollector; Sensor на DC1+DC2;
+4. [x] Выкат на стенд: Collector на AdCollector; Sensor на DC1+DC2;
       плагин `Agent base URL` → `.100`; allowlist `.100`.
-5. [ ] Приёмка multi-DC (критерии в collector.adoc / multi-dc.adoc).
-6. [ ] WinRM liveness + (по решению) multi-IP.
-7. [ ] WEF — после стабильного коллектора.
+      Живой путь DC2→Collector подтверждён: сессия `ivanov`/`10.0.1.10`/
+      `Managers`, `dc=WIN-DR0HHDQLS77.training.rlab`, `ts` свежий (не ручной
+      ingest). DC1 без свежего 4768 ivanov — Kerberos ушёл на DC2 (ожидаемо).
+      Plugin `session-list`: `ivanov`/`10.0.1.10`/`Managers`,
+      `dc=WIN-DR0HHDQLS77…`, `ts=2026-11-20T22:39:11Z`. Live View:
+      ICMP `8.8.8.8` → label `Managers may ping 8.8.8.8`. Сквозной
+      Sensor(DC2)→Collector→Plugin→alias→rule — зелёный.
+5. [x] Приёмка multi-DC 1–4 (2026-11-21): e2e; службы Collector+DC1+DC2;
+      GUI Resync; критерий 4 — KDC/Sensor DC2 Stopped → 4768 на Interca →
+      collector `dc=Interca…`, `ts` свежий; DC2 Kdc+Sensor снова Running.
+6. [ ] WinRM liveness + (по решению) multi-IP — **после первой установки**.
+7. [ ] WEF — после стабильного коллектора — **после первой установки**.
+
+### Cut сдачи заказчику (2026-11-21)
+
+**В комплекте сдачи (готово на лабе + упаковка/доки):**
+
+- Collector + Sensor на каждом DC; служба `AdIdentityAgent`; self-contained
+  publish; Resync; приёмка multi-DC 1–4; handoff в `docs/collector.adoc`
+  (install, acceptance, limitations, смена токена).
+- 1 DC → тот же бинарь, `Role=Standalone` (`docs/quickstart.adoc`).
+
+**Сознательно отложено (не блокер выезда):**
+
+- WinRM-живость (D26), WEF, multi-IP, MSI/pkg, rate limit.
+
+**OpenSearch (2026-11-21):** отдельный скрипт `tools/opensearch-export/`
+(PowerShell на хосте коллектора, задача планировщика). Опрашивает
+`/api/v1/sessions`, пишет интервалы владения IP (`start`/`last_seen`/`end`)
+для сопоставления с NetFlow маршрутизатора. Проверен на подставных снимках и
+подставном HTTP-сервере; на реальном OpenSearch не запускался — ждём
+параметры от заказчика.
+- Перед выездом: сменить shared token, если лаб-токен светился.
 
 **Ограничения, которые v2 ещё не снимает сам по себе:** D26 без живости;
 логи firewall = IP+label; нет MSI/pkg; HTTPS e2e по желанию.

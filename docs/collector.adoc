@@ -6,6 +6,10 @@
 Код коллектора — **тот же бинарь**, что и пилотный агент; режим задаётся
 `AdIdentity:Role`.
 
+Это **основной комплект сдачи**, если у заказчика больше одного DC (или число
+DC неизвестно). Один DC без коллектора — `Role=Standalone`, см.
+`quickstart.adoc`.
+
 == Роли
 
 [cols="1,3"]
@@ -27,6 +31,114 @@ firewall, без Agent API.
 Дедуп по `ts` (и tie-break по `dc`) при upsert.
 |===
 
+== Установка у заказчика (с нуля)
+
+. Собрать self-contained (машина с .NET SDK, не обязательно DC):
++
+[source,powershell]
+----
+dotnet publish agent\src\AdIdentity.Agent.Service\AdIdentity.Agent.Service.csproj `
+  -c Release -r win-x64 --self-contained true -o publish\agent
+----
++
+Только так: без `--self-contained` на хосте без .NET 8 Runtime процесс не
+стартанёт. Каталог `publish\agent-sensor` не использовать — это не пакет.
+
+. Плагин на OPNsense (`plugin/install.sh`), **Apply** в UI.
+  `Agent base URL` = `http://<collector>:8443` (или `https://…`).
+  `Allowed source IPs` = IP коллектора (+ loopback только для отладки).
+  `Shared token` = тот же секрет, что на Windows-хостах.
+
+. Хост коллектора (member server или выделенная VM в домене):
+  скопировать `publish\agent` → `C:\AdIdentity`, взять шаблон
+  `agent/config/appsettings.collector.example.json`, подставить LDAP /
+  `PluginBaseUrl` / `MonitoredGroups` / токен. `Role=Collector`.
+  Firewall: inbound TCP 8443 только с IP OPNsense (resync) и с IP DC
+  (ingest). Зарегистрировать службу (ниже).
+
+. Каждый DC: тот же бинарь → `C:\AdIdentity`, шаблон
+  `agent/config/appsettings.sensor.example.json`, `Role=Sensor`,
+  `CollectorBaseUrl=http://<collector>:8443`, тот же токен.
+  `auditpol` для Kerberos Service Ticket Operations — как в
+  `quickstart.adoc`. Служба `AdIdentityAgent`.
+
+. Правила firewall на OPNsense **вручную** (`Source = <group alias>`).
+  Опционально: user aliases в UI плагина.
+
+IMPORTANT: При обновлении бинаря копировать содержимое `publish\agent`
+**без** затирания рабочего `C:\AdIdentity\appsettings.json`. В publish
+лежит placeholder без секрета.
+
+== Службы Windows
+
+Имя службы всегда **`AdIdentityAgent`**; режим — только `Role` в
+`appsettings.json`.
+
+[source,powershell]
+----
+New-Service -Name AdIdentityAgent `
+  -BinaryPathName '"C:\AdIdentity\AdIdentity.Agent.Service.exe"' `
+  -DisplayName "AdIdentity Agent" -StartupType Automatic
+Start-Service AdIdentityAgent
+----
+
+Или `agent/scripts/Install-AdIdentityService.ps1 -Start` (снимает legacy
+имена `AdIdentityCollector` / `AdIdentitySensor`, если остались).
+
+Проверка коллектора:
+
+[source,powershell]
+----
+Invoke-RestMethod "http://127.0.0.1:8443/api/v1/health" `
+  -Headers @{ Authorization = "Bearer <токен>" }
+# ожидается status=ok, role=Collector
+----
+
+У Sensor отдельного `/health` нет — достаточно `Get-Service AdIdentityAgent`
+→ `Running` и `"Role": "Sensor"` в `appsettings.json`.
+
+== Смена shared token
+
+Лабораторный токен, если светился в переписке/скринах, перед сдачей
+**заменить**. Одна и та же новая строка:
+
+. Сгенерировать длинную случайную строку (например
+  `[Convert]::ToBase64String((1..48|%{Get-Random -Max 256}) -as [byte[]])`).
+. Прописать в `SharedToken` (или `AdIdentity__SharedToken`) на
+  **коллекторе и каждом сенсоре**.
+. То же значение в UI плагина **Shared token** → **Apply**.
+. `Restart-Service AdIdentityAgent` на всех Windows-хостах.
+. Проверка: health/sessions на коллекторе; GUI **Resync** на OPNsense;
+  свежий логин тестового пользователя.
+
+== Чеклист приёмки
+
+. Логин пользователя из `MonitoredGroups` → на коллекторе сессия в
+  `/api/v1/sessions` (`user`, `ip`, `groups`, `dc`, `ts`).
+. `configctl adidentity session-list` на OPNsense — та же сессия.
+. `pfctl -t <Group> -T show` содержит IP клиента.
+. Трафик по правилу с этим alias виден в Live View (label правила).
+. GUI **Resync** → `session-list` не пустеет и совпадает со снимком
+  коллектора.
+. Sensor стоит на **каждом** DC (иначе часть Kerberos-событий пропадёт).
+
+== Ограничения v2 при сдаче
+
+* Лог firewall (Live View) = **IP + label правила**, не имя AD-user и не
+  имя alias отдельным полем. Кто это был: IP → `session-list`.
+* Нет WinRM-живости: выключенный ПК может держать IP в alias до TTL (D26).
+* Один пользователь = один активный IP (last write wins).
+* Нужен Sensor на каждом DC; события Security не реплицируются между DC.
+* `http://` + `AllowInsecureTransport: true` — только если ещё нет TLS;
+  токен на проводе читаем. Предпочтительно HTTPS и новый токен.
+* GUI OPNsense по HTTPS с самоподписанным сертификатом: либо доверить CA
+  OPNsense на хосте коллектора (`Cert:\LocalMachine\Root`) и указать в
+  `PluginBaseUrl` имя из сертификата, либо `PluginIgnoreSslErrors: true`.
+  Полный HTTPS-путь на стенде не проверялся.
+* WEF, multi-IP, MSI — вне текущего комплекта.
+* Выгрузка в OpenSearch — отдельный скрипт `tools/opensearch-export/`
+  (опрос `GET /api/v1/sessions`, интервалы владения IP для NetFlow).
+
 == Лаборатория training.rlab
 
 [cols="1,2"]
@@ -36,7 +148,7 @@ firewall, без Agent API.
 |DC1 `Interca` `10.0.1.110`
 |Sensor
 
-|DC2 `10.0.1.99`
+|DC2 `WIN-DR0HHDQLS77` `10.0.1.99`
 |Sensor
 
 |`AdCollector` `10.0.1.100`
@@ -47,7 +159,8 @@ firewall, без Agent API.
 `Allowed source IPs` = `10.0.1.100` (+ `127.0.0.1` для отладки)
 |===
 
-Общий `SharedToken` на сенсорах, коллекторе и плагине.
+Общий `SharedToken` на сенсорах, коллекторе и плагине (на лабе перед
+выездом — сменить, если засвечен).
 
 == Контракт ingest
 
@@ -84,6 +197,7 @@ Auth: `Authorization: Bearer <SharedToken>` (как Agent API)
 * WinRM-живость
 * Несколько IP на одного пользователя
 * DHCP-отзыв
+* MSI / pkg, rate limit, экспорт в SIEM/OpenSearch
 
 == Критерии готовности (повтор multi-dc.adoc)
 
@@ -91,3 +205,7 @@ Auth: `Authorization: Bearer <SharedToken>` (как Agent API)
 . Шум с двух DC не плодит две сессии одного user.
 . Resync плагина с URL коллектора восстанавливает полный снимок.
 . Падение одного DC не мешает событиям с живого DC.
+
+Лаба `training.rlab` (2026-11-20…21): критерии 1–4 закрыты — e2e через DC2,
+службы на Collector+DC1+DC2, GUI Resync, failover: при Stopped KDC на DC2
+новый 4768 ivanov на Interca → collector `dc=Interca`.

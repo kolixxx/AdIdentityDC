@@ -2,11 +2,15 @@
 :toc: left
 :toclevels: 2
 
-Короткая инструкция для пилота: **один DC + один OPNsense**. Порядок шагов
-обязателен — сначала приёмник (плагин), потом отправитель (агент).
+Короткая инструкция для площадки с **одним DC** (`Role=Standalone`).
 
-Подробности и разбор причин — в `installation.adoc`, `configuration.adoc`,
-`troubleshooting.adoc`. Здесь только то, что нужно сделать.
+Для **нескольких DC** (комплект сдачи v2: Collector + Sensor на каждом DC) —
+см. `collector.adoc`. Если число DC неизвестно — ставить multi-DC по
+`collector.adoc`, а не этот файл.
+
+Порядок шагов обязателен: сначала приёмник (плагин), потом отправитель
+(агент). Подробности — в `installation.adoc`, `configuration.adoc`,
+`troubleshooting.adoc`.
 
 == Прежде чем начать
 
@@ -186,13 +190,18 @@ cd C:\AdIdentity
 [source,powershell]
 ----
 New-Service -Name "AdIdentityAgent" `
-  -BinaryPathName "C:\AdIdentity\AdIdentity.Agent.Service.exe" `
+  -BinaryPathName '"C:\AdIdentity\AdIdentity.Agent.Service.exe"' `
   -DisplayName "AdIdentity Agent" -StartupType Automatic
 Start-Service AdIdentityAgent
 ----
 
+Либо `agent/scripts/Install-AdIdentityService.ps1 -Start` (то же имя службы
+`AdIdentityAgent`).
+
 NOTE: `sc.exe create` спотыкается на кавычках в пути с пробелами и печатает
 справку вместо создания службы. Используйте `New-Service`.
+Копируя обновление из `publish\agent`, **не затирайте** рабочий
+`appsettings.json` (в publish лежит только placeholder без секрета).
 
 == Шаг 7. Проверка
 
@@ -310,5 +319,4 @@ w32tm /resync /force
 * не создаёт правила firewall — только алиасы;
 * не отбирает права у адреса, если за ним появилось устройство без входа в
   домен, до истечения TTL (осознанное ограничение, см. `overview.adoc`);
-* не поддерживает несколько контроллеров домена без отдельной прослойки
-  (`multi-dc.adoc`).
+* несколько DC — не этим файлом: см. `collector.adoc` / `multi-dc.adoc`.

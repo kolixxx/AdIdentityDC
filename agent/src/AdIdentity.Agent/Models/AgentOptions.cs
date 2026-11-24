@@ -43,6 +43,14 @@ public sealed class AgentOptions
     public bool AllowInsecureTransport { get; set; } = false;
 
     /// <summary>
+    /// Accept any TLS certificate from an https:// PluginBaseUrl (OPNsense ships a
+    /// self-signed web GUI certificate). The channel stays encrypted, but anyone who
+    /// can answer on that address receives the shared token. Prefer trusting the
+    /// OPNsense CA on this host; keep false in production.
+    /// </summary>
+    public bool PluginIgnoreSslErrors { get; set; } = false;
+
+    /// <summary>
     /// HttpListener prefix host. Use "+" for all interfaces; "0.0.0.0" is not a valid prefix.
     /// </summary>
     public string ListenAddr { get; set; } = "+";

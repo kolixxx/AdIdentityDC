@@ -23,6 +23,13 @@ public sealed class PluginClient : IPluginClient
         _logger = logger;
         var baseUri = new Uri(_options.PluginBaseUrl.TrimEnd('/') + "/");
         GuardTransport(baseUri, _options.AllowInsecureTransport, _logger);
+        if (_options.PluginIgnoreSslErrors && baseUri.Scheme == Uri.UriSchemeHttps)
+        {
+            _logger.LogWarning(
+                "PluginIgnoreSslErrors is set: the certificate of {BaseUrl} is not verified. " +
+                "Anyone answering on that address receives the shared token.",
+                baseUri);
+        }
         _http.BaseAddress = baseUri;
         _http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _options.SharedToken);

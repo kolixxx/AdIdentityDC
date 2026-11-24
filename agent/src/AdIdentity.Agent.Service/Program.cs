@@ -5,7 +5,19 @@ using AdIdentity.Agent.Service;
 using AdIdentity.Agent.Services;
 using Microsoft.Extensions.DependencyInjection;
 
-var builder = Host.CreateApplicationBuilder(args);
+// SCM starts the process with cwd = System32. Pin ContentRoot to the exe folder
+// so appsettings.json next to the binary is always loaded.
+var exeDir = AppContext.BaseDirectory;
+Directory.SetCurrentDirectory(exeDir);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    ContentRootPath = exeDir
+});
+builder.Configuration.AddJsonFile(
+    Path.Combine(exeDir, "appsettings.json"),
+    optional: false,
+    reloadOnChange: false);
 
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
 
@@ -14,14 +26,11 @@ var role = section.GetValue<AgentRole>("Role");
 var useStubCollector = section.GetSection("Events").GetValue<bool>("UseStubCollector");
 var useStubLdap = section.GetSection("Ldap").GetValue<bool>("UseStubResolver");
 
+// One SCM name on every host. Behavior comes from Role in appsettings, not from
+// the Windows service name (avoids Start-Service failures when Role was mis-read).
 builder.Services.AddWindowsService(options =>
 {
-    options.ServiceName = role switch
-    {
-        AgentRole.Sensor => "AdIdentitySensor",
-        AgentRole.Collector => "AdIdentityCollector",
-        _ => "AdIdentityAgent"
-    };
+    options.ServiceName = "AdIdentityAgent";
 });
 
 switch (role)
@@ -55,7 +64,7 @@ static void RegisterStandalone(IServiceCollection services, bool useStubCollecto
     }
 
     RegisterLdap(services, useStubLdap);
-    services.AddHttpClient<IPluginClient, PluginClient>();
+    RegisterPluginClient(services);
     services.AddSingleton<LoginMemory>();
     services.AddSingleton<SessionPipeline>();
     services.AddHostedService<AgentApiHost>();
@@ -69,7 +78,7 @@ static void RegisterCollector(IServiceCollection services, bool useStubLdap)
     services.AddSingleton<IngestEventBus>();
     services.AddSingleton<IEventCollector>(sp => sp.GetRequiredService<IngestEventBus>());
     RegisterLdap(services, useStubLdap);
-    services.AddHttpClient<IPluginClient, PluginClient>();
+    RegisterPluginClient(services);
     services.AddSingleton<LoginMemory>();
     services.AddSingleton<SessionPipeline>();
     services.AddHostedService(sp => new AgentApiHost(
@@ -94,6 +103,21 @@ static void RegisterSensor(IServiceCollection services, bool useStubCollector)
 
     services.AddHttpClient<CollectorIngestClient>();
     services.AddHostedService<SensorWorker>();
+}
+
+static void RegisterPluginClient(IServiceCollection services)
+{
+    services.AddHttpClient<IPluginClient, PluginClient>()
+        .ConfigurePrimaryHttpMessageHandler(sp =>
+        {
+            var handler = new HttpClientHandler();
+            if (sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AgentOptions>>().Value.PluginIgnoreSslErrors)
+            {
+                handler.ServerCertificateCustomValidationCallback =
+                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            }
+            return handler;
+        });
 }
 
 static void RegisterLdap(IServiceCollection services, bool useStubLdap)
