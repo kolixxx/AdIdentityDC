@@ -52,6 +52,9 @@ if ($existing) {
     Write-Host "Created service $name."
 }
 
+# Restart after a crash: StartupType Automatic only covers boot.
+sc.exe failure $name reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+
 if ($Start) {
     Start-Service -Name $name
     Get-Service -Name $name | Format-List Name, Status, StartType
