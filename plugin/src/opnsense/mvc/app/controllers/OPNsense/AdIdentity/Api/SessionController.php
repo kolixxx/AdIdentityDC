@@ -13,6 +13,7 @@ use OPNsense\AdIdentity\AliasHelper;
  * POST /api/adidentity/session/upsert
  * POST /api/adidentity/session/remove
  * GET  /api/adidentity/session/list
+ * GET  /api/adidentity/session/traffic
  */
 class SessionController extends ApiControllerBase
 {
@@ -272,5 +273,51 @@ class SessionController extends ApiControllerBase
         }
 
         return $decoded;
+    }
+
+    /**
+     * Bytes and open connections per session address, summed from the pf state
+     * table here so the browser never downloads the whole table. Only inbound
+     * states count: a forwarded connection also has an outbound state carrying
+     * the same address, which would double it.
+     */
+    public function trafficAction()
+    {
+        if (!$this->isEnabled()) {
+            return ['status' => 'failed', 'message' => 'AdIdentity disabled', 'items' => new \stdClass()];
+        }
+
+        $backend = new Backend();
+        $sessions = json_decode(trim($backend->configdRun('adidentity session-list')), true);
+        $items = [];
+        foreach (($sessions['sessions'] ?? []) as $s) {
+            $ip = trim((string)($s['ip'] ?? ''));
+            if ($ip !== '') {
+                $items[$ip] = ['bytes' => 0, 'states' => 0];
+            }
+        }
+        if ($items === []) {
+            return ['status' => 'ok', 'items' => new \stdClass()];
+        }
+
+        $top = json_decode($backend->configdRun('filter diag top'), true);
+        if (!is_array($top) || !isset($top['details']) || !is_array($top['details'])) {
+            return ['status' => 'failed', 'message' => 'state table unavailable', 'items' => new \stdClass()];
+        }
+
+        foreach ($top['details'] as $row) {
+            if (($row['dir'] ?? '') !== 'in') {
+                continue;
+            }
+            $addrs = array_unique([(string)($row['src_addr'] ?? ''), (string)($row['dst_addr'] ?? '')]);
+            foreach ($addrs as $addr) {
+                if (isset($items[$addr])) {
+                    $items[$addr]['bytes'] += (int)($row['bytes'] ?? 0);
+                    $items[$addr]['states']++;
+                }
+            }
+        }
+
+        return ['status' => 'ok', 'items' => $items];
     }
 }

@@ -207,9 +207,23 @@ def load_sessions() -> list[dict[str, Any]]:
     return sessions if isinstance(sessions, list) else []
 
 
-def save_sessions(sessions: list[dict[str, Any]]) -> None:
+def load_last_push() -> str | None:
+    try:
+        data = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = data.get("last_push_at") if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def save_sessions(sessions: list[dict[str, Any]], pushed: bool = False) -> None:
+    """``pushed`` marks a write caused by the agent; expiry and listing are not."""
     ensure_dirs()
-    payload = {"sessions": sessions, "updated_at": utc_now().isoformat()}
+    now = utc_now().isoformat()
+    payload: dict[str, Any] = {"sessions": sessions, "updated_at": now}
+    last_push = now if pushed else load_last_push()
+    if last_push:
+        payload["last_push_at"] = last_push
     raw = json.dumps(payload, indent=2) + "\n"
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=str(DB_DIR), delete=False) as tmp:
         tmp.write(raw)
@@ -465,34 +479,40 @@ def wait_for_table(alias: str, timeout_sec: float = TABLE_WAIT_SEC) -> bool:
         time.sleep(0.2)
 
 
-def desired_alias_ips(sessions: list[dict[str, Any]], conf: dict[str, str]) -> dict[str, set[str]]:
+def session_alias_names(s: dict[str, Any], conf: dict[str, str]) -> list[str]:
     groups_allow = monitored_groups(conf)
     enable_user = conf.get("enable_user_aliases", "0") in ("1", "true", "True", "yes")
     prefix = conf.get("user_alias_prefix", "u_") or "u_"
 
+    names: list[str] = []
+    for g in s.get("groups", []) or []:
+        gname = str(g).strip()
+        if not gname:
+            continue
+        if groups_allow and gname not in groups_allow:
+            continue
+        # [D28 ascii-names] skip non-ASCII sources instead of mapping to "unknown"
+        ok, _ = alias_name_allowed(gname, conf)
+        if not ok:
+            continue
+        names.append(normalize_alias_name(gname))
+    if enable_user:
+        user = str(s.get("user", "")).strip()
+        if user:
+            ok, _ = alias_name_allowed(user, conf)
+            if ok:
+                names.append(normalize_alias_name(user, force_prefix=prefix))
+    return names
+
+
+def desired_alias_ips(sessions: list[dict[str, Any]], conf: dict[str, str]) -> dict[str, set[str]]:
     mapping: dict[str, set[str]] = {}
     for s in sessions:
         ip = str(s.get("ip", "")).strip()
         if not is_valid_ip(ip):
             continue
-        for g in s.get("groups", []) or []:
-            gname = str(g).strip()
-            if not gname:
-                continue
-            if groups_allow and gname not in groups_allow:
-                continue
-            # [D28 ascii-names] skip non-ASCII sources instead of mapping to "unknown"
-            ok, _ = alias_name_allowed(gname, conf)
-            if not ok:
-                continue
-            mapping.setdefault(normalize_alias_name(gname), set()).add(ip)
-        if enable_user:
-            user = str(s.get("user", "")).strip()
-            if user:
-                ok, _ = alias_name_allowed(user, conf)
-                if not ok:
-                    continue
-                mapping.setdefault(normalize_alias_name(user, force_prefix=prefix), set()).add(ip)
+        for alias in session_alias_names(s, conf):
+            mapping.setdefault(alias, set()).add(ip)
     return mapping
 
 
@@ -710,7 +730,7 @@ def upsert_session(payload: dict[str, Any]) -> dict[str, Any]:
                 remaining.append(s)
         remaining = drop_sessions_for_ip(remaining, normalized["ip"], keep_key=key)
         remaining.append(normalized)
-        save_sessions(remaining)
+        save_sessions(remaining, pushed=True)
         return {
             "status": "ok",
             "action": "updated" if replaced else "created",
@@ -789,7 +809,7 @@ def replace_all_sessions(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         old = load_sessions()
         old, _ = expire_sessions(old, ttl)
-        save_sessions(normalized)
+        save_sessions(normalized, pushed=True)
         proj = apply_alias_projection(old, normalized, conf)
         return {
             "status": "ok",
@@ -812,7 +832,13 @@ def list_sessions_cmd() -> dict[str, Any]:
         if expired:
             apply_alias_projection(sessions, keep, conf)
             save_sessions(keep)
-        return {"status": "ok", "sessions": keep, "count": len(keep)}
+        rows = [dict(s, aliases=session_alias_names(s, conf)) for s in keep]
+        return {
+            "status": "ok",
+            "sessions": rows,
+            "count": len(rows),
+            "last_push_at": load_last_push(),
+        }
     finally:
         release_lock(lock)
 

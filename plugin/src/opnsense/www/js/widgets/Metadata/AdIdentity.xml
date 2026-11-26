@@ -1,0 +1,38 @@
+<metadata>
+    <adidentity>
+        <filename>AdIdentity.js</filename>
+        <link>/ui/adidentity</link>
+        <endpoints>
+            <endpoint>/api/adidentity/session/list</endpoint>
+            <endpoint>/api/adidentity/session/traffic</endpoint>
+        </endpoints>
+        <translations>
+            <title>AdIdentity</title>
+            <sessions>Sessions</sessions>
+            <lastpush>Last update from agent</lastpush>
+            <never>never</never>
+            <ago>ago</ago>
+            <sec>s</sec>
+            <min>min</min>
+            <hour>h</hour>
+            <unavailable>AdIdentity is unavailable</unavailable>
+            <users>Users now</users>
+            <user>User</user>
+            <ip>IP</ip>
+            <aliases>Aliases</aliases>
+            <connections>Connections</connections>
+            <traffic>Traffic</traffic>
+            <logon>Last activity</logon>
+            <shown>Shown</shown>
+            <nosessions>No active sessions</nosessions>
+            <notraffic>Traffic unavailable</notraffic>
+            <log>Firewall log (AD users)</log>
+            <time>Time</time>
+            <source>Source</source>
+            <destination>Destination</destination>
+            <rule>Rule</rule>
+            <nolog>Firewall log is not accessible</nolog>
+            <nologrows>No logged packets from AD users yet. Enable "Log" on rules that use AdIdentity aliases.</nologrows>
+        </translations>
+    </adidentity>
+</metadata>

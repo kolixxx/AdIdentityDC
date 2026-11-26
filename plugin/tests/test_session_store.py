@@ -928,6 +928,34 @@ def test_listing_sessions_hides_the_expired_ones():
         env.cleanup()
 
 
+def test_listing_names_the_aliases_each_session_feeds():
+    env = Env(
+        conf="monitored_groups=Managers\nenable_user_aliases=1\n",
+        sessions=[session("_ivanov", "10.0.1.10", ["Managers", "Domain Users"])],
+    )
+    try:
+        row = m.list_sessions_cmd()["sessions"][0]
+        assert row["aliases"] == ["Managers", "u_ivanov"]
+        assert "aliases" not in env.stored()[0]
+    finally:
+        env.cleanup()
+
+
+def test_only_agent_writes_move_the_last_push_time():
+    env = Env(conf="monitored_groups=Managers\n", pf={"Managers": set()})
+    try:
+        assert m.list_sessions_cmd()["last_push_at"] is None
+        m.upsert_session({"user": "ivanov", "domain": "INTERNAL", "ip": "10.0.1.10", "groups": ["Managers"]})
+        pushed = m.list_sessions_cmd()["last_push_at"]
+        assert pushed is not None
+        m.expire_cmd()
+        assert m.list_sessions_cmd()["last_push_at"] == pushed
+        m.replace_all_sessions({"sessions": []})
+        assert m.list_sessions_cmd()["last_push_at"] >= pushed
+    finally:
+        env.cleanup()
+
+
 def test_a_corrupt_sessions_file_does_not_take_the_api_down():
     env = Env()
     try:

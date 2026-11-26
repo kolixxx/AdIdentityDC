@@ -1650,6 +1650,14 @@ T11 reboot. T14 (user aliases) — завтра.
 параметры от заказчика.
 - Перед выездом: сменить shared token, если лаб-токен светился.
 
+**Виджет дашборда (2026-11-26):** `plugin/src/opnsense/www/js/widgets/AdIdentity.js`
++ `Metadata/AdIdentity.xml`, ставится `install.sh`. Состояние связки
+(`last_push_at`), пользователи с трафиком открытых pf-состояний
+(`GET /api/adidentity/session/traffic`), лог firewall с подписью пользователя
+(`/api/diagnostics/firewall/log` по digest). API сверены с исходниками
+OPNsense 24.7/25.1/25.7; логика проверена в Node на подставных данных. На живом
+OPNsense ещё не запускался.
+
 **Ограничения, которые v2 ещё не снимает сам по себе:** D26 без живости;
 логи firewall = IP+label; нет MSI/pkg; HTTPS e2e по желанию.
 

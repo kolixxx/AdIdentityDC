@@ -186,7 +186,14 @@ Base:: `/api/adidentity`
 |удалить сессию/IP binding
 
 |`GET /api/adidentity/session/list`
-|локальный список сессий Plugin (debug/UI)
+|локальный список сессий Plugin (debug/UI). У каждой сессии `aliases` — алиасы,
+которые она наполняет; в корне `last_push_at` — время последней записи от агента
+(upsert или resync), UTC
+
+|`GET /api/adidentity/session/traffic`
+|байты и число открытых соединений по IP сессий: `items: {ip: {bytes, states}}`.
+Считается по таблице состояний pf (`configctl filter diag top`, кэш 30 с), только
+входящие состояния. Для виджета дашборда
 
 |`POST /api/adidentity/service/reconfigure`
 |применить настройки Plugin: перегенерировать шаблоны, зарегистрировать cron-задачу
