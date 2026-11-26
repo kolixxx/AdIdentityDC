@@ -125,6 +125,13 @@ public sealed class LdapOptions
     public string BaseDn { get; set; } = "";
 
     /// <summary>
+    /// Track only accounts under these DNs (nested OUs included), e.g.
+    /// "OU=Office,DC=corp,DC=local". Empty: every account under BaseDn.
+    /// Group lookup still searches all of BaseDn.
+    /// </summary>
+    public List<string> UserSearchBases { get; set; } = new();
+
+    /// <summary>
     /// Resolve nested group membership via LDAP_MATCHING_RULE_IN_CHAIN.
     /// </summary>
     public bool UseNestedGroups { get; set; } = true;

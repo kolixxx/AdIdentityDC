@@ -53,6 +53,7 @@ dotnet publish agent\src\AdIdentity.Agent.Service\AdIdentity.Agent.Service.cspro
   скопировать `publish\agent` → `C:\AdIdentity`, взять шаблон
   `agent/config/appsettings.collector.example.json`, подставить LDAP /
   `PluginBaseUrl` / `MonitoredGroups` / токен. `Role=Collector`.
+  Ограничить учёт отдельными OU — `Ldap.UserSearchBases` (см. `reference.adoc`).
   Firewall: inbound TCP 8443 только с IP OPNsense (resync) и с IP DC
   (ingest). Зарегистрировать службу (ниже).
 

@@ -328,6 +328,11 @@ Base:: `/api/v1` на хосте Agent
 * `ApiUseHttps` (default `false`) — требует сертификата, привязанного к порту
   через `netsh http add sslcert`
 * LDAP: `Ldap.Host`, `Ldap.BindDn`, `Ldap.BindPassword`, `Ldap.BaseDn`
+* `Ldap.UserSearchBases` (default `[]`) — учитывать только учётки под этими
+  DN (вложенные OU тоже), например `["OU=Office,DC=corp,DC=local"]`. Пусто —
+  все учётки под `BaseDn`. Группы по-прежнему ищутся по всему `BaseDn`;
+  вместе с `MonitoredGroups` действуют оба фильтра. Учётка вне OU всё же
+  забирает IP, если он уже занят другим пользователем (D1).
 * `MonitoredGroups`
 * `SessionTtlSec`
 * event profile: `Events.Accept4768` + ограниченный `Events.Accept4624`

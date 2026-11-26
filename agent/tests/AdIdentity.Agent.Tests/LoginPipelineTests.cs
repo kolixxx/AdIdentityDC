@@ -88,6 +88,54 @@ public sealed class LoginPipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task A_user_outside_the_search_bases_is_ignored_when_the_address_is_free()
+    {
+        var h = NewHarness(groups: new ScopedGroupResolver(outOfScope: "admin"));
+
+        await h.RunAsync(Logon("admin", "INTERNAL", "10.0.1.100"));
+
+        Assert.Empty(h.Store.GetAll());
+        Assert.Empty(h.Plugin.Upserts);
+    }
+
+    [Fact]
+    public async Task A_user_inside_the_search_bases_is_tracked_without_monitored_groups()
+    {
+        var h = NewHarness(groups: new ScopedGroupResolver(outOfScope: "admin"));
+
+        await h.RunAsync(Logon("ivanov", "INTERNAL", "10.0.1.10"));
+
+        Assert.Equal(new[] { "Managers" }, Assert.Single(h.Store.GetAll()).Groups);
+    }
+
+    [Fact]
+    public async Task A_user_outside_the_search_bases_still_claims_an_occupied_address()
+    {
+        var h = NewHarness(groups: new ScopedGroupResolver(outOfScope: "admin"));
+        await h.RunAsync(Logon("ivanov", "INTERNAL", "10.0.1.10"));
+        h.Plugin.Upserts.Clear();
+
+        await h.RunAsync(Logon("admin", "INTERNAL", "10.0.1.10"));
+
+        var session = Assert.Single(h.Store.GetAll());
+        Assert.Equal("admin", session.User);
+        Assert.Empty(session.Groups);
+        Assert.Empty(Assert.Single(h.Plugin.Upserts).Groups);
+    }
+
+    [Fact]
+    public async Task Search_bases_and_monitored_groups_both_apply()
+    {
+        var h = NewHarness(
+            options => options.MonitoredGroups.Add("VPN_Users"),
+            new ScopedGroupResolver(outOfScope: "admin"));
+
+        await h.RunAsync(Logon("ivanov", "INTERNAL", "10.0.1.10"));
+
+        Assert.Empty(h.Store.GetAll());
+    }
+
+    [Fact]
     public async Task The_kerberos_realm_and_the_netbios_name_key_one_session()
     {
         // 4768 reports INTERNAL.LAB, 4624 reports INTERNAL (D19).
@@ -270,6 +318,26 @@ public sealed class LoginPipelineTests : IDisposable
             CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<string>>(
                 _byUser.TryGetValue(user, out var groups) ? groups : Array.Empty<string>());
+    }
+
+    /// <summary>Every account is in Managers; <c>outOfScope</c> lies outside Ldap.UserSearchBases.</summary>
+    private sealed class ScopedGroupResolver : IGroupResolver
+    {
+        private readonly string _outOfScope;
+
+        public ScopedGroupResolver(string outOfScope) => _outOfScope = outOfScope;
+
+        public Task<IReadOnlyList<string>> ResolveGroupsAsync(
+            string user,
+            string domain,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>(new[] { "Managers" });
+
+        public Task<bool> IsUserInScopeAsync(
+            string user,
+            string domain,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(!string.Equals(user, _outOfScope, StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed class Harness

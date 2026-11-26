@@ -20,6 +20,7 @@ public sealed class LdapGroupResolver : IGroupResolver, IDisposable
     private readonly AgentOptions _options;
     private readonly ILogger<LdapGroupResolver> _logger;
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ScopeEntry> _scopeCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _connectionLock = new();
     private LdapConnection? _connection;
 
@@ -61,6 +62,76 @@ public sealed class LdapGroupResolver : IGroupResolver, IDisposable
         return groups;
     }
 
+    public async Task<bool> IsUserInScopeAsync(
+        string user,
+        string domain,
+        CancellationToken cancellationToken)
+    {
+        var bases = _options.Ldap.UserSearchBases
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .ToList();
+        if (bases.Count == 0)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(_options.Ldap.Host))
+        {
+            return false;
+        }
+
+        var cacheKey = $"{domain}\\{user}";
+        var cacheSeconds = Math.Max(0, _options.Ldap.CacheSeconds);
+        if (cacheSeconds > 0 &&
+            _scopeCache.TryGetValue(cacheKey, out var cached) &&
+            cached.ExpiresAt > DateTimeOffset.UtcNow)
+        {
+            return cached.InScope;
+        }
+
+        var inScope = await Task.Run(
+            () => IsUserInScopeCore(user, domain, bases),
+            cancellationToken).ConfigureAwait(false);
+
+        if (cacheSeconds > 0)
+        {
+            _scopeCache[cacheKey] = new ScopeEntry(inScope, DateTimeOffset.UtcNow.AddSeconds(cacheSeconds));
+        }
+
+        return inScope;
+    }
+
+    private bool IsUserInScopeCore(string user, string domain, IReadOnlyList<string> bases)
+    {
+        try
+        {
+            var connection = GetConnection();
+            foreach (var searchBase in bases)
+            {
+                try
+                {
+                    if (FindUserDn(connection, user, domain, searchBase.Trim()) is not null)
+                    {
+                        return true;
+                    }
+                }
+                catch (DirectoryOperationException ex) when (ex.Response?.ResultCode == ResultCode.NoSuchObject)
+                {
+                    // A mistyped OU must not take the other bases down with it.
+                    _logger.LogError("Ldap.UserSearchBases entry does not exist: {Base}", searchBase);
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            ResetConnection();
+            _logger.LogError(ex, "LDAP scope check failed for {Domain}\\{User}", domain, user);
+            throw;
+        }
+    }
+
     private IReadOnlyList<string> ResolveGroupsCore(string user, string domain)
     {
         var ldap = _options.Ldap;
@@ -73,7 +144,7 @@ public sealed class LdapGroupResolver : IGroupResolver, IDisposable
         try
         {
             var connection = GetConnection();
-            var userDn = FindUserDn(connection, user, domain);
+            var userDn = FindUserDn(connection, user, domain, ldap.BaseDn);
             if (userDn is null)
             {
                 _logger.LogWarning("LDAP user not found: {Domain}\\{User}", domain, user);
@@ -158,7 +229,7 @@ public sealed class LdapGroupResolver : IGroupResolver, IDisposable
         }
     }
 
-    private string? FindUserDn(LdapConnection connection, string user, string domain)
+    private static string? FindUserDn(LdapConnection connection, string user, string domain, string searchBase)
     {
         var escapedUser = EscapeLdapFilter(user);
         // Prefer sAMAccountName; also try UPN when domain looks like DNS.
@@ -167,7 +238,7 @@ public sealed class LdapGroupResolver : IGroupResolver, IDisposable
             : $"(&(objectCategory=person)(objectClass=user)(sAMAccountName={escapedUser}))";
 
         var request = new SearchRequest(
-            _options.Ldap.BaseDn,
+            searchBase,
             filter,
             SearchScope.Subtree,
             "distinguishedName");
@@ -316,4 +387,6 @@ public sealed class LdapGroupResolver : IGroupResolver, IDisposable
     public void Dispose() => ResetConnection();
 
     private sealed record CacheEntry(IReadOnlyList<string> Groups, DateTimeOffset ExpiresAt);
+
+    private sealed record ScopeEntry(bool InScope, DateTimeOffset ExpiresAt);
 }

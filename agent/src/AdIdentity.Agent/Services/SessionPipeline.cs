@@ -73,14 +73,18 @@ public sealed class SessionPipeline
             return;
         }
 
-        var groups = await ResolveMonitoredGroupsAsync(user, domain, cancellationToken);
-        if (ShouldSkipEmptyMonitoredSession(user, domain, raw.Ip, groups))
+        var inScope = await _groups.IsUserInScopeAsync(user, domain, cancellationToken);
+        var groups = inScope
+            ? await ResolveMonitoredGroupsAsync(user, domain, cancellationToken)
+            : Array.Empty<string>();
+        if (ShouldSkipUnmonitoredSession(user, domain, raw.Ip, groups, inScope))
         {
             _logger.LogInformation(
-                "Ignored login for {Domain}\\{User} {Ip}: not in MonitoredGroups",
+                "Ignored login for {Domain}\\{User} {Ip}: {Reason}",
                 domain,
                 user,
-                raw.Ip);
+                raw.Ip,
+                inScope ? "not in MonitoredGroups" : "outside Ldap.UserSearchBases");
             return;
         }
 
@@ -215,8 +219,11 @@ public sealed class SessionPipeline
         string domain,
         CancellationToken cancellationToken)
     {
-        var groups = await ResolveMonitoredGroupsAsync(user, domain, cancellationToken);
-        if (ShouldSkipEmptyMonitoredSession(user, domain, raw.Ip, groups))
+        var inScope = await _groups.IsUserInScopeAsync(user, domain, cancellationToken);
+        var groups = inScope
+            ? await ResolveMonitoredGroupsAsync(user, domain, cancellationToken)
+            : Array.Empty<string>();
+        if (ShouldSkipUnmonitoredSession(user, domain, raw.Ip, groups, inScope))
         {
             return;
         }
@@ -249,17 +256,19 @@ public sealed class SessionPipeline
     }
 
     /// <summary>
-    /// When MonitoredGroups is set, skip users who match none — except when their
-    /// IP is already held by someone else (D1 / criterion 9: claim the address so
-    /// the previous holder leaves group aliases).
+    /// Skip users outside Ldap.UserSearchBases, and users who match no
+    /// MonitoredGroups when that list is set — except when their IP is already
+    /// held by someone else (D1 / criterion 9: claim the address so the previous
+    /// holder leaves group aliases).
     /// </summary>
-    private bool ShouldSkipEmptyMonitoredSession(
+    private bool ShouldSkipUnmonitoredSession(
         string user,
         string domain,
         string ip,
-        IReadOnlyList<string> groups)
+        IReadOnlyList<string> groups,
+        bool inScope)
     {
-        if (_options.MonitoredGroups.Count == 0 || groups.Count > 0)
+        if (inScope && (_options.MonitoredGroups.Count == 0 || groups.Count > 0))
         {
             return false;
         }
